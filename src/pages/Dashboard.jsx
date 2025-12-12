@@ -687,14 +687,14 @@ export default function Dashboard() {
           <div className="dashboard-card">
             <div className="dashboard-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
               <span>Active Gym Memberships</span>
-              <button className="button" onClick={() => openActiveList('gym')} style={{ padding: '6px 10px' }}>View</button>
+              <button className="button" onClick={() => openActiveList('gym')} style={{ padding: '6px 10px', fontWeight: 400, color: 'green' }}>View</button>
             </div>
             <div className="dashboard-value magenta">{stats.activeGym}</div>
           </div>
           <div className="dashboard-card">
             <div className="dashboard-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
               <span>Active Coach Subscriptions</span>
-              <button className="button" onClick={() => openActiveList('coach')} style={{ padding: '6px 10px' }}>View</button>
+              <button className="button" onClick={() => openActiveList('coach')} style={{ padding: '6px 10px', fontWeight: 400, color: 'green' }}>View</button>
             </div>
             <div className="dashboard-value magenta">{stats.activeCoach}</div>
           </div>
