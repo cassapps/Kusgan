@@ -181,16 +181,16 @@ export default function Dashboard() {
     });
     const uniqueVisited = new Set(visitsToday.map(e => String(e.MemberID || e.member_id || e.id || "").trim()).filter(Boolean));
     const visitedToday = uniqueVisited.size;
-    // Coaching sessions: unique (memberId, coach) pairs for entries today where coach is present
-    const coachPairs = new Set();
+    // Coaching Sessions: unique members with a coach selected today
+    const coachedMembers = new Set();
     for (const e of visitsToday) {
-      const coachVal = String(e.Coach || e.coach || '').trim();
+      const coachValRaw = String(e.Coach || e.coach || '').trim();
+      const coachVal = coachValRaw.toLowerCase();
       const memberId = String(e.MemberID || e.member_id || e.id || '').trim();
-      if (coachVal && memberId) {
-        coachPairs.add(`${memberId}::${coachVal.toLowerCase()}`);
-      }
+      const coachSelected = !!coachValRaw && coachVal !== '-' && coachVal !== '—' && coachVal !== 'n/a' && coachVal !== 'na' && coachVal !== 'none';
+      if (coachSelected && memberId) coachedMembers.add(memberId);
     }
-    const coachToday = coachPairs.size;
+    const coachToday = coachedMembers.size;
     // Currently checked-in: unique members who have at least one today's entry with TimeIn and missing TimeOut
     const checkedInSet = new Set();
     for (const e of visitsToday) {
@@ -447,16 +447,16 @@ export default function Dashboard() {
         const uniqueVisited = new Set(visitsToday.map(e => String(e.MemberID || e.member_id || e.id || "").trim()).filter(Boolean));
         const visitedToday = uniqueVisited.size;
 
-        // Coaching Sessions: unique (memberId, coach) pairs for today's entries where coach is present
-        const coachPairs = new Set();
+        // Coaching Sessions: unique members with a coach selected today
+        const coachedMembers = new Set();
         for (const e of visitsToday) {
-          const coachVal = String(e.Coach || e.coach || '').trim();
+          const coachValRaw = String(e.Coach || e.coach || '').trim();
+          const coachVal = coachValRaw.toLowerCase();
           const memberId = String(e.MemberID || e.member_id || e.id || '').trim();
-          if (coachVal && memberId) {
-            coachPairs.add(`${memberId}::${coachVal.toLowerCase()}`);
-          }
+          const coachSelected = !!coachValRaw && coachVal !== '-' && coachVal !== '—' && coachVal !== 'n/a' && coachVal !== 'na' && coachVal !== 'none';
+          if (coachSelected && memberId) coachedMembers.add(memberId);
         }
-        const coachToday = coachPairs.size;
+        const coachToday = coachedMembers.size;
 
         // Currently Checked-In: unique members who have at least one open entry today (TimeIn present, TimeOut missing)
         const checkedInSet = new Set();
