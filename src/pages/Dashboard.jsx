@@ -44,6 +44,37 @@ export default function Dashboard() {
   const [checkoutMemberId, setCheckoutMemberId] = useState(null);
   const [checkoutInitialEntry, setCheckoutInitialEntry] = useState(null);
 
+  const monthKeyForDate = (d) => {
+    try {
+      if (!d || isNaN(d)) return '';
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      return `${y}-${m}`;
+    } catch (e) { return ''; }
+  };
+
+  const monthOptions = useMemo(() => {
+    const out = [];
+    const start = new Date(2025, 10, 1); // Nov 2025
+    const now = new Date();
+    const cur = new Date(start.getFullYear(), start.getMonth(), 1);
+    while (cur <= now) {
+      const key = monthKeyForDate(cur);
+      const label = new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(cur);
+      out.push({ key, label });
+      cur.setMonth(cur.getMonth() + 1);
+    }
+    return out;
+  }, []);
+
+  const defaultMonthKey = useMemo(() => {
+    const cur = monthKeyForDate(new Date());
+    const start = '2025-11';
+    return (cur && cur >= start) ? cur : start;
+  }, []);
+
+  const [selectedMonthKey, setSelectedMonthKey] = useState(defaultMonthKey);
+
   // Generate gym entry rows (computed after state is declared to avoid TDZ)
   const gymEntryRows = useMemo(() => {
     const todays = (gymEntries || []).filter(e => {
@@ -228,6 +259,58 @@ export default function Dashboard() {
     );
     });
   }, [payments, members]);
+
+  const monthlyPayments = useMemo(() => {
+    const candidates = (p) => p.Date || p.date || p.pay_date || p.created || p.timestamp || null;
+    const toDate = (v) => {
+      try {
+        if (!v && v !== 0) return null;
+        if (v instanceof Date) return v;
+        if (typeof v === 'number') return new Date(v);
+        if (v && typeof v.seconds === 'number') return new Date(v.seconds * 1000);
+        return new Date(v);
+      } catch (e) { return null; }
+    };
+    const parseTs = (v) => {
+      try {
+        const d = toDate(v);
+        if (!d || isNaN(d)) return 0;
+        return d.getTime();
+      } catch (e) { return 0; }
+    };
+
+    const filtered = (payments || []).filter(p => {
+      const d = toDate(candidates(p));
+      if (!d || isNaN(d)) return false;
+      return monthKeyForDate(d) === String(selectedMonthKey || '');
+    }).sort((a, b) => parseTs(candidates(b)) - parseTs(candidates(a)));
+
+    const total = filtered.reduce((sum, p) => sum + (parseFloat(p.Cost || p.amount || 0) || 0), 0);
+
+    const rows = filtered.map((p, idx) => {
+      const member = (members || []).find(m => {
+        const pid = String(p.MemberID || p.member_id || p.id || p.member || '').trim();
+        if (!pid) return false;
+        return String(m.MemberID || m.member_id || m.id || '').trim() === pid;
+      });
+      const gymValidRaw = p.gymvaliduntil || p.GymValidUntil || p.gym_valid_until || p.gym_until || p.EndDate || p.Enddate || p.enddate || p.end_date || p.end || p.valid_until || p.expiry || p.expires || p.until || '';
+      const coachValidRaw = p.coachvaliduntil || p.CoachValidUntil || p.coach_valid_until || p.coach_until || '';
+      const gymValid = fmtDate(gymValidRaw);
+      const coachValid = fmtDate(coachValidRaw);
+      return (
+        <tr key={idx}>
+          <td>{displayName(member)}</td>
+          <td>{display(p.Particulars || p.particulars || p.type || p.item || p.category || p.product || p.paymentfor || p.plan || p.description)}</td>
+          <td>{display(gymValid)}</td>
+          <td>{display(coachValid)}</td>
+          <td>{display(p.Mode || p.mode || p.method)}</td>
+          <td>{display((parseFloat(p.Cost||p.amount||0) || 0).toLocaleString())}</td>
+        </tr>
+      );
+    });
+
+    return { total, rows };
+  }, [payments, members, selectedMonthKey]);
  
 
   useEffect(() => {
@@ -583,6 +666,44 @@ export default function Dashboard() {
                 <tr><td colSpan={6}>-</td></tr>
               ) : (
                 paymentRows
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Monthly Revenue */}
+        <div style={{ marginTop: 24 }} className="panel">
+          <div className="panel-header">Monthly Revenue</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: 12, flexWrap: 'wrap' }}>
+            <select
+              value={selectedMonthKey}
+              onChange={(e) => setSelectedMonthKey(e.target.value)}
+              style={{ width: 260, height: 44, padding: '8px 12px', border: '1px solid #e7e8ef', borderRadius: 10, fontSize: 16 }}
+            >
+              {monthOptions.map(opt => (
+                <option key={opt.key} value={opt.key}>{opt.label}</option>
+              ))}
+            </select>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>
+              Total Revenue = ₱ {Number(monthlyPayments.total || 0).toLocaleString()}
+            </div>
+          </div>
+          <table className="aligned payments-table">
+            <thead>
+              <tr>
+                <th>Nickname</th>
+                <th>Particulars</th>
+                <th>Gym Membership<br/>Valid Until</th>
+                <th>Coach Subscription<br/>Valid Until</th>
+                <th>Mode</th>
+                <th>Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(!monthlyPayments.rows || monthlyPayments.rows.length === 0) ? (
+                <tr><td colSpan={6}>-</td></tr>
+              ) : (
+                monthlyPayments.rows
               )}
             </tbody>
           </table>
