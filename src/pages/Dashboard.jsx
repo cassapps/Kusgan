@@ -2,6 +2,7 @@
 import { useEffect, useState, useMemo } from "react";
 import api from "../api";
 const { fetchMembers, fetchPayments, fetchGymEntries, fetchGymEntriesFresh, fetchPricing, fetchDashboard, gymQuickAppend } = api;
+import { useNavigate } from "react-router-dom";
 import { fmtTime, fmtDate, display } from "./MemberDetail.jsx";
 import { isTimeOutMissingRow, firstOf as firstOfVisit } from '../lib/visitUtils';
 import { computeStatusForMember } from '../lib/membership';
@@ -21,6 +22,7 @@ function todayYMD() {
 const firstOf = (o, ks) => firstOfVisit(o, ks);
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   // state/hooks
   const [stats, setStats] = useState({
     totalMembers: 0,
@@ -375,8 +377,8 @@ export default function Dashboard() {
     const total = filtered.reduce((sum, p) => sum + (parseFloat(p.Cost || p.amount || 0) || 0), 0);
 
     const rows = filtered.map((p, idx) => {
+      const pid = String(p.MemberID || p.member_id || p.id || p.member || '').trim();
       const member = (members || []).find(m => {
-        const pid = String(p.MemberID || p.member_id || p.id || p.member || '').trim();
         if (!pid) return false;
         return String(m.MemberID || m.member_id || m.id || '').trim() === pid;
       });
@@ -385,7 +387,15 @@ export default function Dashboard() {
       const gymValid = fmtDate(gymValidRaw);
       const coachValid = fmtDate(coachValidRaw);
       return (
-        <tr key={idx}>
+        <tr
+          key={idx}
+          className={pid ? 'row-link' : undefined}
+          style={pid ? { cursor: 'pointer' } : undefined}
+          onClick={() => {
+            if (!pid) return;
+            navigate(`/members/${encodeURIComponent(pid)}`, { state: { row: member || undefined } });
+          }}
+        >
           <td>{displayName(member)}</td>
           <td>{display(p.Particulars || p.particulars || p.type || p.item || p.category || p.product || p.paymentfor || p.plan || p.description)}</td>
           <td>{display(gymValid)}</td>
