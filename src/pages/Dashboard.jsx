@@ -10,6 +10,7 @@ import CheckInConfirmModal from "../components/CheckInConfirmModal";
 import events from "../lib/events";
 import RefreshBadge from '../components/RefreshBadge.jsx';
 import displayName from '../lib/displayName';
+import ModalWrapper from '../components/ModalWrapper.jsx';
 
 function todayYMD() {
   const now = new Date();
@@ -44,6 +45,9 @@ export default function Dashboard() {
   const [checkoutMemberId, setCheckoutMemberId] = useState(null);
   const [checkoutInitialEntry, setCheckoutInitialEntry] = useState(null);
 
+  const [openActiveModal, setOpenActiveModal] = useState(false);
+  const [activeModalKind, setActiveModalKind] = useState('gym'); // 'gym' | 'coach'
+
   const monthKeyForDate = (d) => {
     try {
       if (!d || isNaN(d)) return '';
@@ -74,6 +78,89 @@ export default function Dashboard() {
   }, []);
 
   const [selectedMonthKey, setSelectedMonthKey] = useState(defaultMonthKey);
+
+  const parseMaybeDate = (v) => {
+    try {
+      if (!v && v !== 0) return null;
+      if (v instanceof Date) return v;
+      if (typeof v === 'number') return new Date(v);
+      if (v && typeof v.seconds === 'number') return new Date(v.seconds * 1000);
+      const d = new Date(v);
+      return isNaN(d) ? null : d;
+    } catch (e) { return null; }
+  };
+
+  const isDateActive = (v) => {
+    const d = parseMaybeDate(v);
+    if (!d) return false;
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const dt = new Date(d);
+    dt.setHours(0,0,0,0);
+    return dt >= today;
+  };
+
+  const resolveMemberId = (m) => String(m?.MemberID || m?.member_id || m?.memberid || m?.memberId || m?.id || '').trim();
+  const resolveNick = (m) => String(m?.NickName || m?.nick_name || m?.nickname || m?.nickName || '').trim();
+  const resolveFullName = (m) => {
+    const full = String(m?.full_name || m?.FullName || m?.fullname || '').trim();
+    if (full) return full;
+    const first = String(m?.FirstName || m?.first_name || m?.firstname || m?.firstName || '').trim();
+    const last = String(m?.LastName || m?.last_name || m?.lastname || m?.lastName || '').trim();
+    return [first, last].filter(Boolean).join(' ');
+  };
+  const resolveMemberSince = (m) => (
+    m?.MemberSince || m?.member_since || m?.membersince || m?.member_date || m?.memberdate ||
+    m?.createdAt || m?.created_at || m?.Created || m?.created || m?.join_date || m?.joined || m?.start_date ||
+    m?._raw?.MemberSince || m?._raw?.createdAt || null
+  );
+
+  const paymentsByMember = useMemo(() => {
+    const map = new Map();
+    for (const p of (payments || [])) {
+      const id = String(p?.MemberID || p?.member_id || p?.id || p?.member || '').trim();
+      if (!id) continue;
+      if (!map.has(id)) map.set(id, []);
+      map.get(id).push(p);
+    }
+    return map;
+  }, [payments]);
+
+  const lastVisitByMember = useMemo(() => {
+    const map = new Map();
+    for (const e of (gymEntries || [])) {
+      const id = String(e?.MemberID || e?.member_id || e?.id || e?.member || '').trim();
+      if (!id) continue;
+      const d = parseMaybeDate(e?.Date || e?.date || e?.Timestamp || e?.timestamp || e?.created || null);
+      if (!d) continue;
+      const prev = map.get(id);
+      if (!prev || d > prev) map.set(id, d);
+    }
+    return map;
+  }, [gymEntries]);
+
+  const activeMembers = useMemo(() => {
+    try {
+      const outGym = [];
+      const outCoach = [];
+      for (const m of (members || [])) {
+        const memberId = resolveMemberId(m);
+        if (!memberId) continue;
+        const pays = paymentsByMember.get(memberId) || [];
+        const st = computeStatusForMember(pays, m, pricing || []);
+        if (st?.membershipState === 'active') outGym.push({ member: m, memberId, st });
+        if (st?.coachActive) outCoach.push({ member: m, memberId, st });
+      }
+      return { gym: outGym, coach: outCoach };
+    } catch (e) {
+      return { gym: [], coach: [] };
+    }
+  }, [members, paymentsByMember, pricing]);
+
+  const openActiveList = (kind) => {
+    setActiveModalKind(kind);
+    setOpenActiveModal(true);
+  };
 
   // Generate gym entry rows (computed after state is declared to avoid TDZ)
   const gymEntryRows = useMemo(() => {
@@ -587,8 +674,20 @@ export default function Dashboard() {
         <div className="dashboard-grid-3x3">
           {/* First row */}
           <div className="dashboard-card"><div className="dashboard-label">Total Members</div><div className="dashboard-value magenta">{stats.totalMembers}</div></div>
-          <div className="dashboard-card"><div className="dashboard-label">Active Gym Memberships</div><div className="dashboard-value magenta">{stats.activeGym}</div></div>
-          <div className="dashboard-card"><div className="dashboard-label">Active Coach Subscriptions</div><div className="dashboard-value magenta">{stats.activeCoach}</div></div>
+          <div className="dashboard-card">
+            <div className="dashboard-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+              <span>Active Gym Memberships</span>
+              <button className="button" onClick={() => openActiveList('gym')} style={{ padding: '6px 10px' }}>View</button>
+            </div>
+            <div className="dashboard-value magenta">{stats.activeGym}</div>
+          </div>
+          <div className="dashboard-card">
+            <div className="dashboard-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+              <span>Active Coach Subscriptions</span>
+              <button className="button" onClick={() => openActiveList('coach')} style={{ padding: '6px 10px' }}>View</button>
+            </div>
+            <div className="dashboard-value magenta">{stats.activeCoach}</div>
+          </div>
           {/* Second row */}
           <div className="dashboard-card"><div className="dashboard-label">Member Visits</div><div className="dashboard-value magenta">{stats.visitedToday}</div></div>
           <div className="dashboard-card"><div className="dashboard-label">Coaching Sessions</div><div className="dashboard-value magenta">{stats.coachToday}</div></div>
@@ -670,6 +769,59 @@ export default function Dashboard() {
             </tbody>
           </table>
         </div>
+
+        <ModalWrapper
+          open={openActiveModal}
+          onClose={() => setOpenActiveModal(false)}
+          title={activeModalKind === 'coach' ? 'Active Coach Subscriptions' : 'Active Gym Memberships'}
+        >
+          <div style={{ overflowX: 'auto' }}>
+            <table className="attendance-table aligned" style={{ width: '100%' }}>
+              <colgroup>
+                <col style={{ width: '15%' }} />
+                <col style={{ width: '25%' }} />
+                <col style={{ width: '15%' }} />
+                <col style={{ width: '15%' }} />
+                <col style={{ width: '15%' }} />
+                <col style={{ width: '15%' }} />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'center' }}>Nick Name</th>
+                  <th style={{ textAlign: 'center' }}>Full Name</th>
+                  <th style={{ textAlign: 'center' }}>Member Since</th>
+                  <th style={{ textAlign: 'center' }}>Last Gym Visit</th>
+                  <th style={{ textAlign: 'center' }}>Gym Valid Until</th>
+                  <th style={{ textAlign: 'center' }}>Coach Valid Until</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(() => {
+                  const list = activeModalKind === 'coach' ? activeMembers.coach : activeMembers.gym;
+                  if (!list || list.length === 0) return <tr><td colSpan={6}>-</td></tr>;
+                  return list.map(({ member: m, memberId, st }, idx) => {
+                    const nick = resolveNick(m).toUpperCase();
+                    const fullName = resolveFullName(m);
+                    const memberSince = resolveMemberSince(m);
+                    const lastVisit = lastVisitByMember.get(memberId) || null;
+                    const gymUntil = st?.membershipEnd || null;
+                    const coachUntil = st?.coachEnd || null;
+                    return (
+                      <tr key={idx}>
+                        <td style={{ textAlign: 'center' }}><strong>{nick}</strong></td>
+                        <td style={{ textAlign: 'left' }}>{fullName}</td>
+                        <td style={{ textAlign: 'center' }}>{fmtDate(memberSince)}</td>
+                        <td style={{ textAlign: 'center' }}>{lastVisit ? fmtDate(lastVisit) : ''}</td>
+                        <td style={{ textAlign: 'center', color: gymUntil ? (isDateActive(gymUntil) ? 'green' : 'red') : 'inherit' }}>{gymUntil ? fmtDate(gymUntil) : ''}</td>
+                        <td style={{ textAlign: 'center', color: coachUntil ? (isDateActive(coachUntil) ? 'green' : 'red') : 'inherit' }}>{coachUntil ? fmtDate(coachUntil) : ''}</td>
+                      </tr>
+                    );
+                  });
+                })()}
+              </tbody>
+            </table>
+          </div>
+        </ModalWrapper>
 
         {/* Monthly Revenue */}
         <div style={{ marginTop: 24 }} className="panel">
