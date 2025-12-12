@@ -71,6 +71,7 @@ const rowDateYMD = (r) => {
 };
 
 export default function StaffAttendance() {
+  const useFirestore = String(import.meta.env.VITE_USE_FIRESTORE ?? 'true') === 'true';
   const [selected, setSelected] = useState('');
   const [rows, setRows] = useState([]);
   const [gymVisits, setGymVisits] = useState([]);
@@ -106,8 +107,8 @@ export default function StaffAttendance() {
       if (cached && cached.length) setRows(cached);
 
       // then fetch fresh server state and update cache
-      const res = await fetch('/attendance');
-      const json = await res.json();
+      const ares = await api.fetchAttendance();
+      const json = (ares && (ares.rows || ares.data)) ? (ares.rows || ares.data) : (Array.isArray(ares) ? ares : []);
       const serverRows = Array.isArray(json) ? json : [];
       setRows(serverRows);
       localCache.setCached('attendance', serverRows);
@@ -124,7 +125,7 @@ export default function StaffAttendance() {
         setGymVisits(Array.isArray(gj) ? gj : []);
       } catch (e) { /* ignore */ }
       // attempt to flush any pending writes
-      localCache.processQueue();
+      if (!useFirestore) localCache.processQueue();
     } catch (e) { console.error('load attendance', e); setError('Failed to load attendance'); }
     finally { setLoading(false); }
   };
@@ -275,20 +276,27 @@ export default function StaffAttendance() {
     setBusy(true); setError('');
     try {
       // Optimistic local update (so UI is instant)
-      const opt = localCache.addOptimisticAttendance(selected);
-      setRows(prev => {
-        const filtered = (prev || []).filter(r => String(r.id) !== String(opt.id));
-        return [opt, ...filtered];
-      });
+      const isOut = isSignedInToday(selected);
+      const now = new Date();
+      const iso = now.toISOString();
+      const ymd = iso.slice(0, 10);
+      const hhmm = iso.slice(11, 16);
+      const tempId = 'local-' + Date.now();
+      const opt = isOut
+        ? { id: tempId, Staff: selected, staff_name: selected, Date: ymd, TimeOut: hhmm, time_out: iso, _localPending: true }
+        : { id: tempId, Staff: selected, staff_name: selected, Date: ymd, TimeIn: hhmm, time_in: iso, status: 'On Duty', _localPending: true };
+      // update UI + cache
+      setRows(prev => [opt, ...((prev || []).filter(r => String(r.id) !== String(opt.id)))]);
+      localCache.setCached('attendance', [opt, ...(localCache.getCached('attendance') || [])]);
 
       // Write using the same client helper pattern as gym entries so writes persist
       // to Firestore when configured (same behavior as gymQuickAppend).
       try {
-        if (api && typeof api.attendanceQuickAppend === 'function') {
+        if (!isOut && api && typeof api.attendanceQuickAppend === 'function') {
           await api.attendanceQuickAppend(selected, {});
-        } else if (api && typeof api.clockIn === 'function') {
-          // fallback: clockIn helper
-          await api.clockIn(selected);
+        } else if (api && typeof api.clockIn === 'function' && api && typeof api.clockOut === 'function') {
+          if (isOut) await api.clockOut(selected);
+          else await api.clockIn(selected);
         } else {
           // As a final fallback, enqueue the legacy /attendance/kiosk request
           localCache.enqueueWrite({ method: 'POST', path: '/attendance/kiosk', body: { staff_name: selected }, tempId: opt.id, collection: 'attendance' });

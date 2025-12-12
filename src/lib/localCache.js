@@ -83,6 +83,12 @@ function pushQueue(item) {
 
 export function enqueueWrite(req) {
   // req: { method, path, body, onSuccess (optional) }
+  // In Firestore mode (static hosting), legacy REST endpoints don't exist.
+  // Avoid queueing writes that will never succeed.
+  try {
+    const useFirestore = String(import.meta.env.VITE_USE_FIRESTORE ?? 'true') === 'true';
+    if (useFirestore) return;
+  } catch (e) { /* ignore */ }
   pushQueue({ id: 'q-' + Date.now() + '-' + Math.floor(Math.random()*1000), ...req });
   processQueue();
 }
@@ -107,7 +113,7 @@ export function addOptimisticAttendance(staffName) {
   s.attendance = [optRow, ...(s.attendance || [])];
   writeStateToIdb(s).catch(() => {});
 
-  // enqueue network write
+  // enqueue network write (only in non-Firestore mode)
   enqueueWrite({ method: 'POST', path: '/attendance/kiosk', body: { staff_name: staffName }, tempId, collection: 'attendance' });
   return optRow;
 }
