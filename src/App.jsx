@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import Login from "./pages/Login";
 import apiClient from './lib/apiClient';
+import { getAuth, onAuthStateChanged, signOut } from 'firebase/auth';
+import { ensureFirebase } from './lib/firebase';
 
 import Nav from "./components/Nav";
 import Dashboard from "./pages/Dashboard";
@@ -19,12 +21,38 @@ import "./styles.css";
 // Use the centralized Login page (username/password) instead of the legacy Google-only card
 
 export default function App() {
+  const useFirestore = useMemo(() => (
+    import.meta.env.VITE_USE_FIRESTORE === 'true' || import.meta.env.VITE_USE_FIRESTORE === undefined
+  ), []);
+
   const [token, setToken] = useState("");
+  const [fbUser, setFbUser] = useState(null);
+  const [fbAuthReady, setFbAuthReady] = useState(!useFirestore);
 
   useEffect(() => {
     const saved = apiClient.getToken();
     if (saved) setToken(saved);
   }, []);
+
+  // In Firestore mode, require Firebase Auth (otherwise Firestore rules often return PERMISSION_DENIED).
+  // This prevents stale server tokens (from /auth/login) from putting the UI into a broken state.
+  useEffect(() => {
+    if (!useFirestore) return;
+    let unsub = null;
+    try {
+      ensureFirebase();
+      const auth = getAuth();
+      unsub = onAuthStateChanged(auth, (user) => {
+        setFbUser(user || null);
+        setFbAuthReady(true);
+      });
+    } catch (e) {
+      // If Firebase isn't configured, fail closed to the Login screen.
+      setFbUser(null);
+      setFbAuthReady(true);
+    }
+    return () => { try { unsub && unsub(); } catch (e) {} };
+  }, [useFirestore]);
 
   const handleLogin = (cred) => {
     setToken(cred);
@@ -34,9 +62,17 @@ export default function App() {
   const handleLogout = () => {
     setToken("");
     localStorage.removeItem("authToken");
+    if (useFirestore) {
+      try { signOut(getAuth()); } catch (e) {}
+    }
   };
 
-  if (!token) return <Login setToken={handleLogin} />;
+  if (useFirestore) {
+    if (!fbAuthReady) return null;
+    if (!fbUser) return <Login setToken={handleLogin} />;
+  } else {
+    if (!token) return <Login setToken={handleLogin} />;
+  }
 
   return (
     <div className="app">

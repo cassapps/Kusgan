@@ -1,11 +1,12 @@
-import { GoogleLogin } from '@react-oauth/google';
-import { getAuth, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, signInWithEmailAndPassword, signInWithPopup } from 'firebase/auth';
 import { ensureFirebase } from '../lib/firebase';
 import { useEffect, useState } from "react";
 import { useNavigate } from 'react-router-dom';
 import apiClient from '../lib/apiClient';
 
 export default function Login({ setToken }) {
+
+  const useFirestore = (import.meta.env.VITE_USE_FIRESTORE === 'true' || import.meta.env.VITE_USE_FIRESTORE === undefined);
 
   // Use setToken from props only!
   // Remove: const [token, setToken] = useState("");
@@ -17,6 +18,8 @@ export default function Login({ setToken }) {
   // Simple local auth state (will POST to server-backed /auth/login)
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  // Firebase Auth email/password (for static hosting like GitHub Pages)
+  const [email, setEmail] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   // single view: staff form first, member sign-in below (member uses Google, disabled for now)
@@ -25,6 +28,7 @@ export default function Login({ setToken }) {
   const handleLocalSignIn = async (e) => {
     e && e.preventDefault();
     setError("");
+    if (useFirestore) return; // Firestore-mode uses Firebase Auth instead (no backend on Pages)
     if (!username || !password) {
       setError("Please enter username and password");
       return;
@@ -55,6 +59,30 @@ export default function Login({ setToken }) {
       }
     } catch (err) {
       setError('Server error — please try again');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFirebaseEmailSignIn = async (e) => {
+    e && e.preventDefault();
+    setError('');
+    if (!useFirestore) return;
+    if (!email || !password) {
+      setError('Please enter email and password');
+      return;
+    }
+    setLoading(true);
+    try {
+      ensureFirebase();
+      const auth = getAuth();
+      const res = await signInWithEmailAndPassword(auth, email.trim(), password);
+      const idToken = await res.user.getIdToken();
+      try { apiClient.setToken(idToken); } catch (e) {}
+      setToken(idToken);
+      try { navigate('/'); } catch (e) {}
+    } catch (err) {
+      setError('Sign-in failed. Check your email/password and Firebase Auth settings.');
     } finally {
       setLoading(false);
     }
@@ -124,43 +152,78 @@ export default function Login({ setToken }) {
           Kusgan Fitness Gym
         </h1>
 
-        {/* Staff sign-in */}
         <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 8 }}>
-          <div style={{ fontSize: 13, color: '#c9c9da', fontWeight: 600, marginBottom: 4, textAlign: 'left' }}></div>
-          <form onSubmit={handleLocalSignIn} style={{ width: "100%", display: "flex", flexDirection: "column", gap: 8 }}>
-          <label style={{ fontSize: 12, color: "#c9c9da", textAlign: "left" }}>Username</label>
-          <input
-            type="text"
-            value={username}
-            onChange={e => setUsername(e.target.value)}
-            placeholder="Enter staff username"
-            style={{ padding: 10, fontSize: 16, borderRadius: 6, border: "1px solid #2a2a36", background: '#0f1114', color: '#fff' }}
-          />
+          {useFirestore ? (
+            <>
+              {/* Firestore-mode: Firebase Auth (Email/Password) */}
+              <form onSubmit={handleFirebaseEmailSignIn} style={{ width: "100%", display: "flex", flexDirection: "column", gap: 8 }}>
+                <label style={{ fontSize: 12, color: "#c9c9da", textAlign: "left" }}>Email</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  placeholder="frontdesk@yourdomain.com"
+                  autoComplete="username"
+                  style={{ padding: 10, fontSize: 16, borderRadius: 6, border: "1px solid #2a2a36", background: '#0f1114', color: '#fff' }}
+                />
 
-          <label style={{ fontSize: 12, color: "#c9c9da", textAlign: "left" }}>Password</label>
-          <input
-            type="password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            placeholder="Enter staff password"
-            style={{ padding: 10, fontSize: 16, borderRadius: 6, border: "1px solid #2a2a36", background: '#0f1114', color: '#fff' }}
-          />
+                <label style={{ fontSize: 12, color: "#c9c9da", textAlign: "left" }}>Password</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder="Enter password"
+                  autoComplete="current-password"
+                  style={{ padding: 10, fontSize: 16, borderRadius: 6, border: "1px solid #2a2a36", background: '#0f1114', color: '#fff' }}
+                />
 
-          {error && <div style={{ color: "#f44336", fontSize: 13 }}>{error}</div>}
+                {error && <div style={{ color: "#f44336", fontSize: 13 }}>{error}</div>}
 
-            <button type="submit" disabled={loading} style={{ marginTop: 6, padding: 12, borderRadius: 6, background: "#1976d2", color: "#fff", border: "none", cursor: loading ? 'default' : 'pointer', opacity: loading ? 0.8 : 1 }}>
-              {loading ? 'Signing in…' : 'Sign in'}
-            </button>
-          </form>
+                <button type="submit" disabled={loading} style={{ marginTop: 6, padding: 12, borderRadius: 6, background: "#1976d2", color: "#fff", border: "none", cursor: loading ? 'default' : 'pointer', opacity: loading ? 0.8 : 1 }}>
+                  {loading ? 'Signing in…' : 'Sign in'}
+                </button>
+              </form>
 
-          {/* Member sign-in (below staff) */}
-          <div style={{ marginTop: 18, width: '100%', textAlign: 'center' }}>
-            <div style={{ fontSize: 13, color: '#c9c9da', fontWeight: 600, marginBottom: 8 }}>Sign in as Member</div>
-            <div style={{ display: 'flex', justifyContent: 'center' }}>
-              <button onClick={handleGoogleSignIn} style={{ borderRadius: 8, padding: '8px 12px', background: '#fff', color: '#222', cursor: 'pointer' }}>Sign in with Google</button>
-            </div>
-            <div style={{ marginTop: 8, color: '#8b8b9b', fontSize: 13 }}>Member login via Google is not yet enabled.</div>
-          </div>
+              {/* Optional: Google sign-in */}
+              <div style={{ marginTop: 18, width: '100%', textAlign: 'center' }}>
+                <div style={{ fontSize: 13, color: '#c9c9da', fontWeight: 600, marginBottom: 8 }}>Or</div>
+                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                  <button onClick={handleGoogleSignIn} style={{ borderRadius: 8, padding: '8px 12px', background: '#fff', color: '#222', cursor: 'pointer' }}>Continue with Google</button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Non-Firestore mode: server-backed username/password */}
+              <form onSubmit={handleLocalSignIn} style={{ width: "100%", display: "flex", flexDirection: "column", gap: 8 }}>
+                <label style={{ fontSize: 12, color: "#c9c9da", textAlign: "left" }}>Username</label>
+                <input
+                  type="text"
+                  value={username}
+                  onChange={e => setUsername(e.target.value)}
+                  placeholder="Enter staff username"
+                  style={{ padding: 10, fontSize: 16, borderRadius: 6, border: "1px solid #2a2a36", background: '#0f1114', color: '#fff' }}
+                />
+
+                <label style={{ fontSize: 12, color: "#c9c9da", textAlign: "left" }}>Password</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder="Enter staff password"
+                  style={{ padding: 10, fontSize: 16, borderRadius: 6, border: "1px solid #2a2a36", background: '#0f1114', color: '#fff' }}
+                />
+
+                {error && <div style={{ color: "#f44336", fontSize: 13 }}>{error}</div>}
+
+                <button type="submit" disabled={loading} style={{ marginTop: 6, padding: 12, borderRadius: 6, background: "#1976d2", color: "#fff", border: "none", cursor: loading ? 'default' : 'pointer', opacity: loading ? 0.8 : 1 }}>
+                  {loading ? 'Signing in…' : 'Sign in'}
+                </button>
+              </form>
+
+              <div style={{ marginTop: 8, color: '#8b8b9b', fontSize: 13 }}>Member login via Google is not yet enabled.</div>
+            </>
+          )}
         </div>
       </div>
     </div>

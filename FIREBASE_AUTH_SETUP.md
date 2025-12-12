@@ -105,3 +105,28 @@ Recommended lifecycle for moving from quick to secure:
 3. Remove the `DEFAULT_FRONTDESK_HASH` constant and rely only on envs or Firestore.
 
 If you want, I can prepare PRs that implement the frontend login workflow and backend ID token verification (I already added code that does this), and add a Github Actions workflow for Pages & instructions for hosting the server on Render.
+
+## GitHub Pages (this repo)
+This repo includes a Pages workflow at `.github/workflows/pages.yml`.
+
+In your GitHub repo settings:
+- **Settings → Pages → Source**: select `Deploy from a branch`
+- **Branch**: `gh-pages` / `(root)`
+- **Settings → Secrets and variables → Actions → Secrets**: add
+  - `VITE_FIREBASE_API_KEY`
+  - `VITE_FIREBASE_AUTH_DOMAIN`
+  - `VITE_FIREBASE_PROJECT_ID`
+  - `VITE_FIREBASE_APP_ID`
+  - Optional: `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_GOOGLE_CLIENT_ID`
+
+### Frontdesk login on GitHub Pages
+GitHub Pages is static hosting, so the frontend cannot safely validate a password against a Firestore `users` collection without a backend.
+
+For Pages deployments, use **Firebase Authentication (Email/Password)** for the frontdesk account:
+- Firebase Console → Authentication → Sign-in method → enable **Email/Password**
+- Create a user like `frontdesk@yourdomain.com` (or any email you choose)
+- Sign in using that email/password in the app
+
+If you want to keep a Firestore `users` collection with bcrypt hashes, you must host a backend (or Cloud Function) that:
+- validates username/password server-side
+- then signs the client in via Firebase Auth (custom token) or proxies Firestore operations
