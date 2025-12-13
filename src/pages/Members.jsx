@@ -79,9 +79,27 @@ const yesy = (v) => ["yes","y","true","1"].includes(String(v||"").trim().toLower
 const firstOf = (obj, keys) => keys.map(k=>obj[k]).find(v => v !== undefined && v !== "");
 const getStr = (row, keys) => String(firstOf(row, keys) ?? "");
 const asDate = (v) => {
-  if (v instanceof Date) return v;
-  const d = new Date(v);
-  return isNaN(d) ? null : d;
+  try {
+    if (v instanceof Date) return v;
+    if (!v && v !== 0) return null;
+    if (typeof v === 'number') {
+      const d = new Date(v);
+      return isNaN(d) ? null : d;
+    }
+    // Firestore Timestamp (client or admin) often has toDate() or {seconds}
+    if (v && typeof v.toDate === 'function') {
+      const d = v.toDate();
+      return (d instanceof Date && !isNaN(d)) ? d : null;
+    }
+    if (v && typeof v.seconds === 'number') {
+      const d = new Date(v.seconds * 1000);
+      return isNaN(d) ? null : d;
+    }
+    const d = new Date(v);
+    return isNaN(d) ? null : d;
+  } catch (e) {
+    return null;
+  }
 };
 const isSameDay = (a, b) =>
   a && b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
@@ -121,20 +139,21 @@ const toTitleCase = (s) => {
 
 // Pretty date like "Nov-2, 2025"
 const fmtDate = (d) => {
-  if (!d) return "";
-  const m = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()];
-  return `${m}-${d.getDate()}, ${d.getFullYear()}`;
+  const dt = asDate(d);
+  if (!dt) return "";
+  const m = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][dt.getMonth()];
+  return `${m}-${dt.getDate()}, ${dt.getFullYear()}`;
 };
 
 // Return true if the given date (ISO/Date/string) is >= today (date-only, Manila/local)
 const isDateActive = (d) => {
-  if (!d) return false;
-  const dt = d instanceof Date ? new Date(d) : new Date(d);
-  if (isNaN(dt)) return false;
+  const dt = asDate(d);
+  if (!dt) return false;
   const today = new Date();
   today.setHours(0,0,0,0);
-  dt.setHours(0,0,0,0);
-  return dt >= today;
+  const x = new Date(dt);
+  x.setHours(0,0,0,0);
+  return x >= today;
 };
 
 const ageFromBirthday = (bday) => {
@@ -182,8 +201,17 @@ function buildMemberStatusIndex(membersRaw) {
     const m = normRow(raw);
     const memberId = firstOf(m, ["memberid","member_id","id","member_id_"]);
     if (!memberId) continue;
-    const membershipEnd = pick(m, ["membershipEnd","membership_end","gymvaliduntil","gym_valid_until","gym_until","enddate","end_date","valid_until","expiry","expires","until","end"]);
-    const coachEnd = pick(m, ["coachEnd","coach_end","coachvaliduntil","coach_valid_until","coach_until","coach_expiry","coach_expires"]);
+    const membershipEnd = pick(m, [
+      "membershipEnd","membership_end","membershipend",
+      "membership_end_date","membership_expiry","membershipexpires",
+      "gymvaliduntil","gym_valid_until","gym_until",
+      "enddate","end_date","valid_until","expiry","expires","until","end",
+    ]);
+    const coachEnd = pick(m, [
+      "coachEnd","coach_end","coachend",
+      "coach_subscription_end","coach_subscription_end_date","coachsubscriptionend",
+      "coachvaliduntil","coach_valid_until","coach_until","coach_expiry","coach_expires",
+    ]);
     const membershipState = String(m.membershipState || m.membership_state || m.status || '').trim().toLowerCase() || null;
     const coachActive = isDateActive(coachEnd);
     idx.set(memberId, { membershipEnd: membershipEnd || null, coachEnd: coachEnd || null, membershipState, coachActive });

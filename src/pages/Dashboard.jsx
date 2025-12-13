@@ -176,7 +176,7 @@ export default function Dashboard() {
           const membershipState = String(m?.membershipState || m?.membership_state || m?.status || '').trim().toLowerCase();
           const coachState = String(m?.coachState || m?.coach_state || '').trim().toLowerCase();
           const gymUntil = pick(m, ["membershipEnd","membership_end","gymvaliduntil","gym_valid_until","gym_until","enddate","end_date","valid_until","expiry","expires","until","end","gym_valid","gym_validity","gymvalid"]);
-          const coachUntil = pick(m, ["coachEnd","coach_end","coachvaliduntil","coach_valid_until","coach_until","coach_expiry","coach_expires"]);
+          const coachUntil = pick(m, ["coachEnd","coach_end","coach_subscription_end","coach_subscription_end_date","coachvaliduntil","coach_valid_until","coach_until","coach_expiry","coach_expires"]);
           const gymActive = (membershipState === 'active') || isDateActive(gymUntil);
           const coachActive = (coachState === 'active') || isDateActive(coachUntil);
           const st = { membershipState: gymActive ? 'active' : 'inactive', coachActive: !!coachActive, membershipEnd: gymUntil || null, coachEnd: coachUntil || null };
@@ -741,7 +741,7 @@ export default function Dashboard() {
         const membershipState = String(m?.membershipState || m?.membership_state || m?.status || '').trim().toLowerCase();
         const coachState = String(m?.coachState || m?.coach_state || '').trim().toLowerCase();
         const gymUntil = pick(m, ["membershipEnd","membership_end","gymvaliduntil","gym_valid_until","gym_until","enddate","end_date","valid_until","expiry","expires","until","end","gym_valid","gym_validity","gymvalid"]);
-        const coachUntil = pick(m, ["coachEnd","coach_end","coachvaliduntil","coach_valid_until","coach_until","coach_expiry","coach_expires"]);
+        const coachUntil = pick(m, ["coachEnd","coach_end","coach_subscription_end","coach_subscription_end_date","coachvaliduntil","coach_valid_until","coach_until","coach_expiry","coach_expires"]);
         const gymActive = (membershipState === 'active') || isDateActive(gymUntil);
         const coachActive = (coachState === 'active') || isDateActive(coachUntil);
         if (gymActive) activeGym++;
