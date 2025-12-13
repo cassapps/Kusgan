@@ -28,6 +28,57 @@ const driveThumb = (u = "") => {
   return id ? `https://drive.google.com/thumbnail?id=${id}&sz=w1000` : s;
 };
 
+const asDate = (v) => {
+  try {
+    if (!v && v !== 0) return null;
+    if (v instanceof Date) return isNaN(v) ? null : v;
+    if (typeof v === 'number') {
+      const d = new Date(v);
+      return isNaN(d) ? null : d;
+    }
+    if (v && typeof v.toDate === 'function') {
+      const d = v.toDate();
+      return (d instanceof Date && !isNaN(d)) ? d : null;
+    }
+    if (v && typeof v.toMillis === 'function') {
+      const d = new Date(v.toMillis());
+      return isNaN(d) ? null : d;
+    }
+    if (v && typeof v.seconds === 'number') {
+      const d = new Date(v.seconds * 1000);
+      return isNaN(d) ? null : d;
+    }
+    if (v && typeof v._seconds === 'number') {
+      const d = new Date(v._seconds * 1000);
+      return isNaN(d) ? null : d;
+    }
+    const d = new Date(v);
+    return isNaN(d) ? null : d;
+  } catch (e) {
+    return null;
+  }
+};
+
+const manilaYMD = (v) => {
+  try {
+    if (!v && v !== 0) return '';
+    if (typeof v === 'string') {
+      const s = v.trim();
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    }
+    const d = asDate(v);
+    if (!d) return '';
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Manila',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(d);
+  } catch (e) {
+    return '';
+  }
+};
+
 export default function VisitViewModal({ open, onClose, row, onCheckout }) {
   const navigate = useNavigate();
   const [busy, setBusy] = React.useState(false);
@@ -106,6 +157,12 @@ export default function VisitViewModal({ open, onClose, row, onCheckout }) {
 
   const [openCheckoutModal, setOpenCheckoutModal] = React.useState(false);
 
+  const isTodayVisit = React.useMemo(() => {
+    const visitY = manilaYMD(dateRaw);
+    if (!visitY) return false;
+    return visitY === manilaYMD(new Date());
+  }, [dateRaw]);
+
   // Keep hooks stable even when `open` is false — only short-circuit rendering after hooks
   if (!open) return null;
 
@@ -167,7 +224,7 @@ export default function VisitViewModal({ open, onClose, row, onCheckout }) {
         </div>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
           {/* Show Check Out if entry has no TimeOut: navigate to Check-In page to use the unified confirm modal */}
-          {(!timeOut) ? (
+          {(!timeOut && isTodayVisit) ? (
             <button
               className="primary-btn"
               onClick={() => {
