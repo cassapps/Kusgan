@@ -16,7 +16,7 @@ const {
   listenPaymentsActive,
 } = api;
 import { useNavigate } from "react-router-dom";
-import { fmtTime, fmtDate, display } from "./MemberDetail.jsx";
+import { fmtTime, fmtDate, fmtDateTime, display } from "./MemberDetail.jsx";
 import { isTimeOutMissingRow, firstOf as firstOfVisit } from '../lib/visitUtils';
 import { computeStatusForMember } from '../lib/membership';
 import VisitViewModal from "../components/VisitViewModal";
@@ -443,12 +443,14 @@ export default function Dashboard() {
       return String(m.MemberID || m.member_id || m.id || "").trim() === pid;
     });
     const pills = member ? getMemberPills(member) : [];
+    const paidRaw = candidates(p);
     const gymValidRaw = p.gymvaliduntil || p.GymValidUntil || p.gym_valid_until || p.gym_until || p.EndDate || p.Enddate || p.enddate || p.end_date || p.end || p.valid_until || p.expiry || p.expires || p.until || "";
     const coachValidRaw = p.coachvaliduntil || p.CoachValidUntil || p.coach_valid_until || p.coach_until || "";
     const gymValid = fmtDate(gymValidRaw);
     const coachValid = fmtDate(coachValidRaw);
     return (
       <tr key={idx}>
+        <td>{display(fmtDateTime(paidRaw))}</td>
         <td>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
             <span>{displayName(member)}</span>
@@ -504,6 +506,7 @@ export default function Dashboard() {
         return String(m.MemberID || m.member_id || m.id || '').trim() === pid;
       });
       const pills = member ? getMemberPills(member) : [];
+      const paidRaw = candidates(p);
       const gymValidRaw = p.gymvaliduntil || p.GymValidUntil || p.gym_valid_until || p.gym_until || p.EndDate || p.Enddate || p.enddate || p.end_date || p.end || p.valid_until || p.expiry || p.expires || p.until || '';
       const coachValidRaw = p.coachvaliduntil || p.CoachValidUntil || p.coach_valid_until || p.coach_until || '';
       const gymValid = fmtDate(gymValidRaw);
@@ -518,6 +521,7 @@ export default function Dashboard() {
             navigate(`/members/${encodeURIComponent(pid)}`, { state: { row: member || undefined } });
           }}
         >
+          <td>{display(fmtDateTime(paidRaw))}</td>
           <td>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
               <span>{displayName(member)}</span>
@@ -1057,6 +1061,7 @@ export default function Dashboard() {
           <table className="aligned payments-table">
             <thead>
               <tr>
+                <th>Date</th>
                 <th>Nickname</th>
                 <th>Particulars</th>
                 <th>Gym Membership<br/>Valid Until</th>
@@ -1067,7 +1072,7 @@ export default function Dashboard() {
             </thead>
             <tbody>
               {(!paymentRows || (Array.isArray(paymentRows) && paymentRows.length === 0)) ? (
-                <tr><td colSpan={6}>-</td></tr>
+                <tr><td colSpan={7}>-</td></tr>
               ) : (
                 paymentRows
               )}
@@ -1158,6 +1163,7 @@ export default function Dashboard() {
           <table className="aligned payments-table">
             <thead>
               <tr>
+                <th>Date</th>
                 <th>Nickname</th>
                 <th>Particulars</th>
                 <th>Gym Membership<br/>Valid Until</th>
@@ -1168,7 +1174,7 @@ export default function Dashboard() {
             </thead>
             <tbody>
               {(!monthlyPayments.rows || monthlyPayments.rows.length === 0) ? (
-                <tr><td colSpan={6}>-</td></tr>
+                <tr><td colSpan={7}>-</td></tr>
               ) : (
                 monthlyPayments.rows
               )}

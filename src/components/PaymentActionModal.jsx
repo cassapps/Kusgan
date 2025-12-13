@@ -1,7 +1,7 @@
 import React from "react";
 import ModalWrapper from "./ModalWrapper";
 import api from "../api";
-import { fmtDate, display, MANILA_TZ } from "../pages/MemberDetail.jsx";
+import { fmtDate, fmtDateTime, display, MANILA_TZ } from "../pages/MemberDetail.jsx";
 
 const { updatePayment, deletePayment } = api;
 
@@ -153,7 +153,7 @@ export default function PaymentActionModal({ open, onClose, payment, onChanged }
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
         <div style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 10, padding: 10 }}>
           <span style={{ fontSize: 14, fontStyle: "italic", color: "var(--muted)", display: "block", marginBottom: 4 }}>Date</span>
-          <div style={{ fontWeight: 700, fontSize: 18 }}>{fmtDate(paidRaw) || "-"}</div>
+          <div style={{ fontWeight: 700, fontSize: 18 }}>{fmtDateTime(paidRaw) || "-"}</div>
         </div>
         <div style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 10, padding: 10 }}>
           <span style={{ fontSize: 14, fontStyle: "italic", color: "var(--muted)", display: "block", marginBottom: 4 }}>Cost</span>

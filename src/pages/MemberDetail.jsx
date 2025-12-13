@@ -69,6 +69,28 @@ const fmtDate = (d) => {
   const y = parts.find((p) => p.type === "year")?.value || "";
   return `${m}-${day}, ${y}`;
 };
+
+const fmtDateTime = (d) => {
+  if (!d) return "-";
+  const date = d instanceof Date ? d : new Date(d);
+  if (isNaN(date)) return "-";
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: MANILA_TZ,
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  }).formatToParts(date);
+  const m = parts.find((p) => p.type === "month")?.value || "";
+  const day = parts.find((p) => p.type === "day")?.value || "";
+  const y = parts.find((p) => p.type === "year")?.value || "";
+  const hr = parts.find((p) => p.type === "hour")?.value || "";
+  const min = parts.find((p) => p.type === "minute")?.value || "";
+  const ap = parts.find((p) => p.type === "dayPeriod")?.value || "";
+  return `${m}-${day}, ${y} ${hr}:${min} ${ap}`.trim();
+};
 const display = (v) => (v === undefined || v === null || String(v).trim() === "" ? "-" : String(v));
 
 // normalize Drive viewer links to direct-view URLs; leave googleusercontent links as-is
@@ -847,7 +869,7 @@ export default function MemberDetail() {
                   setSelectedPayment(p);
                 }}
               >
-                <td>{fmtDate(paid)}</td>
+                <td>{fmtDateTime(paid)}</td>
                 <td>{display(particulars)}</td>
                 <td>{fmtDate(gymUntil)}</td>
                 <td>{fmtDate(coachUntil)}</td>
@@ -871,4 +893,4 @@ export default function MemberDetail() {
 }
 
 // Named exports for shared formatting helpers used across pages
-export { fmtTime, fmtDate, display, MANILA_TZ };
+export { fmtTime, fmtDate, fmtDateTime, display, MANILA_TZ };

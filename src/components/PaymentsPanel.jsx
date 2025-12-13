@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import "../styles.css";
 import api from "../api";
 import apiClient from '../lib/apiClient';
+import { fmtDateTime } from "../pages/MemberDetail.jsx";
 const { fetchPayments, addPayment, fetchMembers } = api;
 
 const MANILA_TZ = "Asia/Manila";
@@ -418,7 +419,7 @@ export default function PaymentsPanel() {
             ) : (
               rows.map((r, i) => (
                 <tr key={i}>
-                  <td>{fmtManilaDate(r.Date)}</td>
+                  <td>{fmtDateTime(`${r.Date}T${r.Time || "00:00"}:00+08:00`)}</td>
                   <td>{fmtManilaTime(`${r.Date}T${r.Time || "00:00"}:00+08:00`)}</td>
                   <td>{r.MemberID}</td>
                   <td>{r.Particulars}</td>
