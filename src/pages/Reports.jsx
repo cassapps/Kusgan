@@ -576,7 +576,7 @@ export default function Reports() {
 
           {!revCollapsed && revenuePager.canLoadMore && (
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
-              <button className="pill white" type="button" onClick={revenuePager.loadMore} style={{ cursor: 'pointer' }}>
+              <button className="load-more-link" type="button" onClick={revenuePager.loadMore}>
                 Load 20 more
               </button>
             </div>
@@ -625,7 +625,7 @@ export default function Reports() {
 
           {!expCollapsed && expensesPager.canLoadMore && (
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
-              <button className="pill white" type="button" onClick={expensesPager.loadMore} style={{ cursor: 'pointer' }}>
+              <button className="load-more-link" type="button" onClick={expensesPager.loadMore}>
                 Load 20 more
               </button>
             </div>

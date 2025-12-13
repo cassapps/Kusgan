@@ -388,7 +388,7 @@ export default function StaffAttendance() {
         </div>
         {attendancePager.canLoadMore && (
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8, paddingRight: 8 }}>
-            <button className="pill white" type="button" onClick={attendancePager.loadMore} style={{ cursor: 'pointer' }}>
+            <button className="load-more-link" type="button" onClick={attendancePager.loadMore}>
               Load 20 more
             </button>
           </div>
@@ -462,7 +462,7 @@ export default function StaffAttendance() {
         </div>
         {coachingPager.canLoadMore && (
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8, paddingRight: 8 }}>
-            <button className="pill white" type="button" onClick={coachingPager.loadMore} style={{ cursor: 'pointer' }}>
+            <button className="load-more-link" type="button" onClick={coachingPager.loadMore}>
               Load 20 more
             </button>
           </div>

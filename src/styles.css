@@ -402,6 +402,21 @@ table.aligned{ table-layout:fixed; margin-bottom:40px; }
 }
 .button:hover{ opacity:.9; }
 
+/* ---------- Load more (tables) ---------- */
+.load-more-link{
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 6px 0;
+  color: var(--kusgan-magenta);
+  font-weight: 800;
+  cursor: pointer;
+  text-decoration: none;
+}
+.load-more-link:hover{ text-decoration: underline; }
+.load-more-link:focus{ outline: none; box-shadow: var(--btn-ring); border-radius: 6px; }
+.load-more-link[disabled]{ opacity: 0.5; cursor: not-allowed; text-decoration: none; }
+
 /* Back + Track Progress (consistent size + spacing) */
 .back-btn,
 .progress-header button,

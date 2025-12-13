@@ -587,7 +587,7 @@ export default function AdminPage() {
 
             {pricingPager.canLoadMore && (
               <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 10 }}>
-                <button className="button" onClick={pricingPager.loadMore}>Load 20 more</button>
+                <button className="load-more-link" type="button" onClick={pricingPager.loadMore}>Load 20 more</button>
               </div>
             )}
             

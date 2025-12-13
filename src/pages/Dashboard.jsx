@@ -985,7 +985,7 @@ export default function Dashboard() {
           </div>
           {paymentsModalPager.canLoadMore && (
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
-              <button className="pill white" type="button" onClick={paymentsModalPager.loadMore} style={{ cursor: 'pointer' }}>
+              <button className="load-more-link" type="button" onClick={paymentsModalPager.loadMore}>
                 Load 20 more
               </button>
             </div>
@@ -1015,7 +1015,7 @@ export default function Dashboard() {
           </table>
           {gymEntriesPager.canLoadMore && (
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
-              <button className="pill white" type="button" onClick={gymEntriesPager.loadMore} style={{ cursor: 'pointer' }}>
+              <button className="load-more-link" type="button" onClick={gymEntriesPager.loadMore}>
                 Load 20 more
               </button>
             </div>
@@ -1109,7 +1109,7 @@ export default function Dashboard() {
           </div>
           {activePager.canLoadMore && (
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
-              <button className="pill white" type="button" onClick={activePager.loadMore} style={{ cursor: 'pointer' }}>
+              <button className="load-more-link" type="button" onClick={activePager.loadMore}>
                 Load 20 more
               </button>
             </div>

@@ -551,7 +551,7 @@ export default function Members() {
 
                   {membersPager.canLoadMore && (
                     <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 10 }}>
-                      <button className="button" onClick={membersPager.loadMore}>Load 20 more</button>
+                      <button className="load-more-link" type="button" onClick={membersPager.loadMore}>Load 20 more</button>
                     </div>
                   )}
                 </div>
@@ -609,7 +609,7 @@ export default function Members() {
 
               {membersPager.canLoadMore && (
                 <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 10 }}>
-                  <button className="button" onClick={membersPager.loadMore}>Load 20 more</button>
+                  <button className="load-more-link" type="button" onClick={membersPager.loadMore}>Load 20 more</button>
                 </div>
               )}
               </div>

@@ -715,7 +715,7 @@ export default function MemberDetail() {
         </table>
         {visits.length > visitsLimit && (
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
-            <button className="pill white" type="button" onClick={() => setVisitsLimit((n) => Math.min(n + 20, visits.length))} style={{ cursor: 'pointer' }}>
+            <button className="load-more-link" type="button" onClick={() => setVisitsLimit((n) => Math.min(n + 20, visits.length))}>
               Load 20 more
             </button>
           </div>
@@ -821,7 +821,7 @@ export default function MemberDetail() {
         </table>
         {progress.length > progressLimit && (
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
-            <button className="pill white" type="button" onClick={() => setProgressLimit((n) => Math.min(n + 20, progress.length))} style={{ cursor: 'pointer' }}>
+            <button className="load-more-link" type="button" onClick={() => setProgressLimit((n) => Math.min(n + 20, progress.length))}>
               Load 20 more
             </button>
           </div>
@@ -882,7 +882,7 @@ export default function MemberDetail() {
         </table>
         {payments.length > paymentsLimit && (
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
-            <button className="pill white" type="button" onClick={() => setPaymentsLimit((n) => Math.min(n + 20, payments.length))} style={{ cursor: 'pointer' }}>
+            <button className="load-more-link" type="button" onClick={() => setPaymentsLimit((n) => Math.min(n + 20, payments.length))}>
               Load 20 more
             </button>
           </div>
