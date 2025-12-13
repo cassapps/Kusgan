@@ -31,6 +31,34 @@ export const ALLOWED_PARTICULARS = [
   "Kusgan ID",
 ];
 
+// Defaults used when pricing rows are missing/incomplete.
+// Firestore pricing rows (if present) can still override Cost/Validity.
+const DEFAULTS = new Map([
+  // Gym membership only
+  [normName("Daily Pass - Off Peak"), { cost: 70, validity: 1, gym: true, coach: false }],
+  [normName("Daily Pass - Peak"), { cost: 100, validity: 1, gym: true, coach: false }],
+  [normName("Daily Pass - Special"), { cost: 50, validity: 1, gym: true, coach: false }],
+  [normName("Monthly Pass - Student"), { cost: 1000, validity: 30, gym: true, coach: false }],
+  [normName("Monthly Pass - Senior"), { cost: 1000, validity: 30, gym: true, coach: false }],
+  [normName("Monthly Pass - Regular"), { cost: 1200, validity: 30, gym: true, coach: false }],
+  [normName("Yearly Pass - Regular"), { cost: 12000, validity: 365, gym: true, coach: false }],
+  // Coach subscription only
+  [normName("Daily Coach - Off Peak"), { cost: 150, validity: 1, gym: false, coach: true }],
+  [normName("Daily Coach Only"), { cost: 200, validity: 1, gym: false, coach: true }],
+  [normName("Monthly Coach Only"), { cost: 2300, validity: 30, gym: false, coach: true }],
+  // Gym & Coach bundle
+  [normName("Daily Pass w/ Coach - Off Peak"), { cost: 200, validity: 1, gym: true, coach: true }],
+  [normName("Daily Pass w/ Coach"), { cost: 250, validity: 1, gym: true, coach: true }],
+  [normName("Monthly Pass w/ Coach"), { cost: 3500, validity: 30, gym: true, coach: true }],
+  // Merchandise
+  [normName("Kusgan Shirt"), { cost: 600, validity: 0, gym: false, coach: false }],
+  [normName("Kusgan ID"), { cost: 150, validity: 0, gym: false, coach: false }],
+]);
+
+export function getParticularsDefaults(particulars) {
+  return DEFAULTS.get(normName(particulars)) || null;
+}
+
 const ALLOWED_SET = new Set(ALLOWED_PARTICULARS.map(normName));
 
 export function isAllowedParticulars(particulars) {

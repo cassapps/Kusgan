@@ -3,7 +3,7 @@ import api from "../api";
 const { addPayment, fetchPricing, fetchPayments } = api;
 import ModalWrapper from "./ModalWrapper";
 import events from "../lib/events";
-import { effectiveValidityDays, isManilaOffPeak, isParticularsVisible } from "../lib/pricingRules";
+import { ALLOWED_PARTICULARS, effectiveValidityDays, getParticularsDefaults, isManilaOffPeak } from "../lib/pricingRules";
 
 const MANILA_TZ = "Asia/Manila";
 
@@ -244,37 +244,59 @@ export default function PaymentModal({ open, onClose, memberId, onSaved, members
   }, [coachEnd]);
 
   // Filter pricing based on eligibility rules (visibility rules from pricing sheet)
-  const filteredPricing = useMemo(() => {
-    const ctx = {
-      hasActiveGym,
-      hasActiveCoach,
-      isStudent: !!isStudent,
-      isSenior: !!isSenior,
-      isSpecial: !!isSpecial,
-      isOffPeak,
-      showAllParticulars: true,
+  const availablePricing = useMemo(() => {
+    const normalize = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const hasFlagCols = (row) => {
+      if (!row) return false;
+      return Object.keys(row).some((k) => {
+        const nk = String(k).toLowerCase().replace(/\s+/g, '');
+        return nk === 'gymmembership' || nk === 'coachsubscription' || nk === 'coachsubscriptiononly' || nk === 'coach';
+      });
     };
-    return (pricing || []).filter((p) => {
-      const name = String(p?.Particulars || "").trim();
-      if (!name) return false;
-      return isParticularsVisible(name, ctx);
-    });
-  }, [pricing, hasActiveGym, hasActiveCoach, isStudent, isSenior, isSpecial, isOffPeak]);
 
-  // Clear selection if it becomes ineligible due to filters
+    const pricingByName = new Map();
+    (pricing || []).forEach((r) => {
+      const name = normalize(r?.Particulars);
+      if (name) pricingByName.set(name, r);
+    });
+
+    return (ALLOWED_PARTICULARS || []).map((name) => {
+      const defaults = getParticularsDefaults(name);
+      const fromDb = pricingByName.get(normalize(name));
+
+      const baseFlags = (fromDb && hasFlagCols(fromDb)) ? getFlags(fromDb) : { gym: !!defaults?.gym, coach: !!defaults?.coach };
+      const costRaw = (fromDb && fromDb.Cost !== undefined && fromDb.Cost !== null && String(fromDb.Cost) !== '')
+        ? fromDb.Cost
+        : (defaults ? defaults.cost : '');
+      const validityRaw = (fromDb && fromDb.Validity !== undefined && fromDb.Validity !== null && String(fromDb.Validity) !== '')
+        ? fromDb.Validity
+        : (defaults ? defaults.validity : 0);
+
+      return {
+        ...(fromDb || {}),
+        Particulars: name,
+        Cost: costRaw,
+        Validity: validityRaw,
+        "Gym membership": baseFlags.gym ? 'Yes' : 'No',
+        "Coach subscription": baseFlags.coach ? 'Yes' : 'No',
+      };
+    });
+  }, [pricing]);
+
+  // Clear selection if it disappears (shouldn't happen with the allowlist, but keep it safe)
   useEffect(() => {
     if (!form.Particulars) return;
-    const stillThere = filteredPricing.some((p) => String(p.Particulars) === String(form.Particulars));
+    const stillThere = availablePricing.some((p) => String(p.Particulars) === String(form.Particulars));
     if (!stillThere) setForm((f) => ({ ...f, Particulars: "", Cost: "", EndDate: "" }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filteredPricing]);
+  }, [availablePricing]);
 
   
 
-  // Group filtered pricing into categories for the dropdown
+  // Group pricing into categories for the dropdown
   const groupedPricing = useMemo(() => {
     const groups = { gymOnly: [], coachOnly: [], bundle: [], merch: [] };
-    (filteredPricing || []).forEach((p) => {
+    (availablePricing || []).forEach((p) => {
       const f = getFlags(p);
       if (f.gym && !f.coach) groups.gymOnly.push(p);
       else if (!f.gym && f.coach) groups.coachOnly.push(p);
@@ -282,12 +304,12 @@ export default function PaymentModal({ open, onClose, memberId, onSaved, members
       else groups.merch.push(p);
     });
     return groups;
-  }, [filteredPricing]);
+  }, [availablePricing]);
 
   // Debug UI removed in production
 
   const onParticulars = (val) => {
-    const item = (filteredPricing || []).find((r) => String(r.Particulars) === String(val));
+    const item = (availablePricing || []).find((r) => String(r.Particulars) === String(val));
     const cost = item ? (parseFloat(item.Cost) || 0).toFixed(2) : "";
     const validity = item ? effectiveValidityDays(item.Particulars, item.Validity) : 0;
     const flags = getFlags(item);
@@ -359,7 +381,7 @@ export default function PaymentModal({ open, onClose, memberId, onSaved, members
   };
 
   const onStartDate = (start) => {
-    const item = (filteredPricing || []).find((r) => String(r.Particulars) === String(form.Particulars));
+    const item = (availablePricing || []).find((r) => String(r.Particulars) === String(form.Particulars));
     const validity = item ? effectiveValidityDays(item.Particulars, item.Validity) : 0;
     setForm((f) => ({ ...f, StartDate: start, EndDate: validity ? endDateFrom(start, validity) : "" }));
   };
@@ -375,16 +397,10 @@ export default function PaymentModal({ open, onClose, memberId, onSaved, members
     setError("");
     try {
       // Derive the resulting new valid-until dates for gym/coach based on the selected item
-      const item = (filteredPricing || []).find((r) => String(r.Particulars) === String(form.Particulars));
+      const item = (availablePricing || []).find((r) => String(r.Particulars) === String(form.Particulars));
       if (!item) throw new Error("Selected Particulars is not available.");
       const validity = effectiveValidityDays(item.Particulars, item.Validity);
       const flags = getFlags(item);
-      const ctx = { hasActiveGym, hasActiveCoach, isStudent: !!isStudent, isSenior: !!isSenior, isSpecial: !!isSpecial, isOffPeak };
-      if (!isParticularsVisible(item.Particulars, ctx)) {
-        setError('This Particulars is not available right now.');
-        setBusy(false);
-        return;
-      }
   const today = manilaTodayYMD();
   const gymCurrent = membershipEnd ? toManilaYMD(membershipEnd) : "";
   const coachCurrent = coachEnd ? toManilaYMD(coachEnd) : "";
@@ -473,7 +489,7 @@ export default function PaymentModal({ open, onClose, memberId, onSaved, members
             </select>
             {/* New validity preview below Particulars, soft pink */}
             {form.Particulars && (() => {
-              const item = (filteredPricing || []).find((r) => String(r.Particulars) === String(form.Particulars));
+              const item = (availablePricing || []).find((r) => String(r.Particulars) === String(form.Particulars));
               const flags = getFlags(item);
               const validity = item ? effectiveValidityDays(item.Particulars, item.Validity) : 0;
               if (!validity) return null;
