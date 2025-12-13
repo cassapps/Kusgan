@@ -876,6 +876,20 @@ export async function insertRow(sheetName, row) {
 }
 
 export async function fetchPayments() { return { rows: await fb.getCollection(COLS.payments) }; }
+
+export async function updatePayment(paymentId, patch) {
+  const id = String(paymentId || '').trim();
+  if (!id) throw new Error('paymentId required');
+  const updated = await fb.updateDocument(COLS.payments, id, patch || {});
+  return { ok: true, id: updated?.id || id, row: updated };
+}
+
+export async function deletePayment(paymentId) {
+  const id = String(paymentId || '').trim();
+  if (!id) throw new Error('paymentId required');
+  await fb.deleteDocument(COLS.payments, id);
+  return { ok: true, id };
+}
 export async function addPayment(payload) {
   const r = await fb.addDocument(COLS.payments, payload);
 
@@ -1345,12 +1359,13 @@ const api = {
   fetchAttendance, fetchAttendanceSince, clockIn, clockOut,
   fetchGymEntries, fetchGymEntriesFresh, addGymEntry, gymQuickAppend,
   fetchProgressTracker, addProgressRow,
-  fetchPricing, fetchPayments, addPayment, fetchDashboard,
+  fetchPricing, fetchPayments, addPayment, updatePayment, deletePayment, fetchDashboard,
   // new helpers
   fetchMembersRecent, searchMembersByName,
   fetchGymEntriesSince, fetchGymEntriesForDate,
   fetchPaymentsSince, fetchPaymentsForDate, fetchPaymentsForMonth,
   listenMembers, listenGymEntriesForDate, listenPaymentsForDate, listenPaymentsForMonth,
+  listenPaymentsActive,
   addPricing, updatePricing, uploadPhoto,
 };
 

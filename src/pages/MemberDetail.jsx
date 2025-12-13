@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import PaymentModal from "../components/PaymentModal";
+import PaymentActionModal from "../components/PaymentActionModal";
 import EditMemberModal from "../components/EditMemberModal";
 import QrCodeModal from "../components/QrCodeModal";
 import ProgressModal from "../components/ProgressModal";
@@ -7,6 +8,9 @@ import ProgressViewModal from "../components/ProgressViewModal";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import api from "../api";
 const { fetchMembers, fetchPayments, fetchGymEntries, fetchProgressTracker, fetchMemberBundle, fetchPricing, fetchMemberById, fetchMemberByIdFresh, addPayment } = api;
+import { getAuth, onAuthStateChanged } from 'firebase/auth';
+import { ensureFirebase } from '../lib/firebase';
+import { isAdminUid } from '../lib/admin';
 import LoadingSkeleton from "../components/LoadingSkeleton";
 import RefreshBadge from '../components/RefreshBadge.jsx';
 import MemberProfileCard from "../components/MemberProfileCard";
@@ -110,10 +114,14 @@ const driveThumb = (u) => {
 
 export default function MemberDetail() {
   const [selectedVisit, setSelectedVisit] = useState(null);
+  const [selectedPayment, setSelectedPayment] = useState(null);
   const { id: idParam, memberId: memberIdParam } = useParams();
   const navigate = useNavigate();
   const loc = useLocation();
   const passed = React.useMemo(() => (loc.state?.row ? norm(loc.state.row) : null), [loc.state?.row]);
+
+  const useFirestore = (import.meta.env.VITE_USE_FIRESTORE === 'true' || import.meta.env.VITE_USE_FIRESTORE === undefined);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const [member, setMember] = useState(passed || null);
   const [loading, setLoading] = useState(!passed); // render immediately if we have a passed row
@@ -165,6 +173,26 @@ export default function MemberDetail() {
 
   // Reset image-failed flag whenever the computed photo URL changes
   useEffect(() => { setImgFailed(false); }, [photoUrl]);
+
+  // UI-only admin gating (UID allowlist)
+  useEffect(() => {
+    if (!useFirestore) {
+      setIsAdmin(false);
+      return;
+    }
+    let unsub = null;
+    try {
+      ensureFirebase();
+      const auth = getAuth();
+      // Ensure reactively updated if auth session changes
+      unsub = onAuthStateChanged(auth, (u) => {
+        setIsAdmin(!!u && isAdminUid(u.uid));
+      });
+    } catch (e) {
+      setIsAdmin(false);
+    }
+    return () => { try { unsub && unsub(); } catch (e) {} };
+  }, [useFirestore]);
 
   // Helper: treat empty / dash-like TimeOut markers as missing; reuseable across this component
   const isTimeOutMissingRow = (row) => {
@@ -524,6 +552,17 @@ export default function MemberDetail() {
         birthDate={bday}
       />
 
+      {/* Admin-only payment actions modal (edit/delete) */}
+      <PaymentActionModal
+        open={!!selectedPayment}
+        onClose={() => setSelectedPayment(null)}
+        payment={selectedPayment}
+        onChanged={() => {
+          setSelectedPayment(null);
+          refreshBundle();
+        }}
+      />
+
       {/* Edit Member modal */}
       <EditMemberModal
         open={openEdit}
@@ -790,8 +829,16 @@ export default function MemberDetail() {
             const coachUntil = asDate(firstOf(p, ["coachvaliduntil","coach_valid_until","coach_until"]));
             const mode = firstOf(p, ["mode","payment_mode","method","via"]);
             const cost = firstOf(p, ["cost","amount","price","total","paid"]);
+            const canOpen = isAdmin && !!String(p?.id || '').trim();
             return (
-              <tr key={i}>
+              <tr
+                key={i}
+                style={canOpen ? { cursor: "pointer" } : undefined}
+                onClick={() => {
+                  if (!canOpen) return;
+                  setSelectedPayment(p);
+                }}
+              >
                 <td>{fmtDate(paid)}</td>
                 <td>{display(particulars)}</td>
                 <td>{fmtDate(gymUntil)}</td>

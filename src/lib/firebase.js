@@ -1,7 +1,7 @@
 // Minimal Firebase client wrapper for browser usage (Firestore)
 // Usage: set VITE_FIREBASE_API_KEY, VITE_FIREBASE_AUTH_DOMAIN, VITE_FIREBASE_PROJECT_ID, VITE_FIREBASE_APP_ID
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, collection, doc, doc as docFn, getDoc, getDocs, setDoc, addDoc, updateDoc, query, where, orderBy, startAt, endAt, limit as limitFn, onSnapshot, documentId } from 'firebase/firestore';
+import { getFirestore, collection, doc, doc as docFn, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, startAt, endAt, limit as limitFn, onSnapshot, documentId } from 'firebase/firestore';
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 const clientConfig = {
@@ -194,6 +194,12 @@ export async function updateDocument(colName, id, patch) {
   return { id: snap.id, ...snap.data() };
 }
 
+export async function deleteDocument(colName, id) {
+  const d = docRef(colName, id);
+  await deleteDoc(d);
+  return { ok: true, id: String(id) };
+}
+
 export default {
   ensureFirebase,
   getDB,
@@ -207,6 +213,7 @@ export default {
   addDocument,
   setDocument,
   updateDocument,
+  deleteDocument,
   getStorageInstance,
   uploadFile,
 };
