@@ -777,7 +777,49 @@ export async function insertRow(sheetName, row) {
 }
 
 export async function fetchPayments() { return { rows: await fb.getCollection(COLS.payments) }; }
-export async function addPayment(payload) { const r = await fb.addDocument(COLS.payments, payload); return { ok: true, id: r.id }; }
+export async function addPayment(payload) {
+  const r = await fb.addDocument(COLS.payments, payload);
+
+  // Denormalize validity onto member doc so Dashboard/Members can render without scanning payments.
+  try {
+    const mid = String(payload?.MemberID || payload?.memberId || payload?.memberid || payload?.member || '').trim();
+    if (mid) {
+      const gymUntil = String(payload?.membershipEnd || payload?.MembershipEnd || payload?.GymValidUntil || payload?.gymvaliduntil || payload?.gym_valid_until || payload?.gym_until || payload?.EndDate || payload?.enddate || payload?.end_date || payload?.valid_until || payload?.expiry || payload?.expires || payload?.until || '').trim();
+      const coachUntil = String(payload?.coachEnd || payload?.CoachEnd || payload?.CoachValidUntil || payload?.coachvaliduntil || payload?.coach_valid_until || payload?.coach_until || '').trim();
+
+      const patch = {};
+      if (gymUntil) {
+        patch.membershipEnd = gymUntil;
+        patch.membership_end = gymUntil;
+        patch.membershipState = 'active';
+        patch.membership_state = 'active';
+      }
+      if (coachUntil) {
+        patch.coachEnd = coachUntil;
+        patch.coach_end = coachUntil;
+        patch.coachState = 'active';
+        patch.coach_state = 'active';
+      }
+      if (Object.keys(patch).length > 0) {
+        patch.updatedAt = new Date().toISOString();
+        patch.updated_at = patch.updatedAt;
+        try {
+          await fb.updateDocument(COLS.members, mid, patch);
+        } catch (e) {
+          // Fallback: some datasets store MemberID as a field, not the doc id.
+          try {
+            const hit = await fb.queryCollection(COLS.members, { wheres: [{ field: 'MemberID', op: '==', value: mid }], limit: 1 });
+            if (hit && hit.length && hit[0]?.id) {
+              await fb.updateDocument(COLS.members, hit[0].id, patch);
+            }
+          } catch (e2) { /* ignore */ }
+        }
+      }
+    }
+  } catch (e) { /* ignore */ }
+
+  return { ok: true, id: r.id };
+}
 
 export async function fetchPaymentsSince({ days = 30, limit = 2000 } = {}) {
   const cutoff = new Date(Date.now() - (days * 24 * 60 * 60 * 1000));
