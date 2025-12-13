@@ -12,11 +12,10 @@ const {
   listenMembers,
   listenGymEntriesForDate,
   listenPaymentsForDate,
-  listenPaymentsForMonth,
   listenPaymentsActive,
 } = api;
 import { useNavigate } from "react-router-dom";
-import { fmtTime, fmtDate, fmtDateTime, display } from "./MemberDetail.jsx";
+import { fmtTime, fmtDate, display } from "./MemberDetail.jsx";
 import { isTimeOutMissingRow, firstOf as firstOfVisit } from '../lib/visitUtils';
 import { computeStatusForMember } from '../lib/membership';
 import VisitViewModal from "../components/VisitViewModal";
@@ -59,7 +58,6 @@ export default function Dashboard() {
   const [members, setMembers] = useState([]);
   const [payments, setPayments] = useState([]);
   const [paymentsToday, setPaymentsToday] = useState([]);
-  const [paymentsMonth, setPaymentsMonth] = useState([]);
   const [paymentsActive, setPaymentsActive] = useState([]);
   const [gymEntries, setGymEntries] = useState([]);
   const [pricing, setPricing] = useState([]);
@@ -76,36 +74,7 @@ export default function Dashboard() {
   const [openActiveModal, setOpenActiveModal] = useState(false);
   const [activeModalKind, setActiveModalKind] = useState('gym'); // 'gym' | 'coach'
 
-  const monthKeyForDate = (d) => {
-    try {
-      if (!d || isNaN(d)) return '';
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, '0');
-      return `${y}-${m}`;
-    } catch (e) { return ''; }
-  };
-
-  const monthOptions = useMemo(() => {
-    const out = [];
-    const start = new Date(2025, 10, 1); // Nov 2025
-    const now = new Date();
-    const cur = new Date(start.getFullYear(), start.getMonth(), 1);
-    while (cur <= now) {
-      const key = monthKeyForDate(cur);
-      const label = new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(cur);
-      out.push({ key, label });
-      cur.setMonth(cur.getMonth() + 1);
-    }
-    return out;
-  }, []);
-
-  const defaultMonthKey = useMemo(() => {
-    const cur = monthKeyForDate(new Date());
-    const start = '2025-11';
-    return (cur && cur >= start) ? cur : start;
-  }, []);
-
-  const [selectedMonthKey, setSelectedMonthKey] = useState(defaultMonthKey);
+  
 
   const parseMaybeDate = (v) => {
     try {
@@ -184,7 +153,7 @@ export default function Dashboard() {
   const paymentsByMember = useMemo(() => {
     const map = new Map();
     for (const p of (payments || [])) {
-      const id = String(p?.MemberID || p?.member_id || p?.id || p?.member || '').trim();
+      const id = String(p.MemberID || p.member_id || p.id || p.member || '').trim();
       if (!id) continue;
       if (!map.has(id)) map.set(id, []);
       map.get(id).push(p);
@@ -195,7 +164,7 @@ export default function Dashboard() {
   const activePaymentsByMember = useMemo(() => {
     const map = new Map();
     for (const p of (paymentsActive || [])) {
-      const id = String(p?.MemberID || p?.member_id || p?.id || p?.member || '').trim();
+      const id = String(p.MemberID || p.member_id || p.id || p.member || '').trim();
       if (!id) continue;
       if (!map.has(id)) map.set(id, []);
       map.get(id).push(p);
@@ -203,23 +172,8 @@ export default function Dashboard() {
     return map;
   }, [paymentsActive]);
 
-  const lastVisitByMember = useMemo(() => {
-    const map = new Map();
-    for (const e of (gymEntries || [])) {
-      const id = String(e?.MemberID || e?.member_id || e?.id || e?.member || '').trim();
-      if (!id) continue;
-      const d = parseMaybeDate(e?.Date || e?.date || e?.Timestamp || e?.timestamp || e?.created || null);
-      if (!d) continue;
-      const prev = map.get(id);
-      if (!prev || d > prev) map.set(id, d);
-    }
-    return map;
-  }, [gymEntries]);
-
   const activeMembers = useMemo(() => {
     try {
-      const outGym = [];
-      const outCoach = [];
       const pick = (o, keys) => {
         for (const k of keys) {
           if (o && Object.prototype.hasOwnProperty.call(o, k)) return o[k];
@@ -228,36 +182,41 @@ export default function Dashboard() {
         }
         return undefined;
       };
+
+      const outGym = [];
+      const outCoach = [];
       for (const m of (members || [])) {
         const memberId = resolveMemberId(m);
         if (!memberId) continue;
 
-        if (useFirestore) {
-          // Prefer payment-derived status when available (works even if member docs lack denormalized fields)
-          const pays = activePaymentsByMember.get(memberId) || [];
-          const stFromPays = pays.length ? computeStatusForMember(pays, m, pricing || []) : null;
+        const pays = useFirestore
+          ? (activePaymentsByMember.get(memberId) || [])
+          : (paymentsByMember.get(memberId) || []);
 
-          const membershipState = String(m?.membershipState || m?.membership_state || m?.status || '').trim().toLowerCase();
-          const coachState = String(m?.coachState || m?.coach_state || '').trim().toLowerCase();
-          const gymUntil = pick(m, ["membershipEnd","membership_end","gymvaliduntil","gym_valid_until","gym_until","enddate","end_date","valid_until","expiry","expires","until","end","gym_valid","gym_validity","gymvalid"]);
-          const coachUntil = pick(m, ["coachEnd","coach_end","coach_subscription_end","coach_subscription_end_date","coachvaliduntil","coach_valid_until","coach_until","coach_expiry","coach_expires"]);
+        const st0 = computeStatusForMember(pays, m, pricing || []);
+        const gymUntil = st0?.membershipEnd ?? pick(m, [
+          'membershipEnd','membership_end','gymvaliduntil','gym_valid_until','gym_until','enddate','end_date','valid_until','expiry','expires','until','end','gym_valid','gym_validity','gymvalid'
+        ]);
+        const coachUntil = st0?.coachEnd ?? pick(m, [
+          'coachEnd','coach_end','coach_subscription_end','coach_subscription_end_date','coachvaliduntil','coach_valid_until','coach_until','coach_expiry','coach_expires'
+        ]);
 
-          const gymActive = (stFromPays?.membershipState === 'active') || (membershipState === 'active') || isDateActive(gymUntil);
-          const coachActive = (stFromPays?.coachActive === true) || (coachState === 'active') || isDateActive(coachUntil);
-          const st = {
-            membershipState: gymActive ? 'active' : 'inactive',
-            coachActive: !!coachActive,
-            membershipEnd: (stFromPays?.membershipEnd || gymUntil || null),
-            coachEnd: (stFromPays?.coachEnd || coachUntil || null),
-          };
-          if (gymActive) outGym.push({ member: m, memberId, st });
-          if (coachActive) outCoach.push({ member: m, memberId, st });
-        } else {
-          const pays = paymentsByMember.get(memberId) || [];
-          const st = computeStatusForMember(pays, m, pricing || []);
-          if (st?.membershipState === 'active') outGym.push({ member: m, memberId, st });
-          if (st?.coachActive) outCoach.push({ member: m, memberId, st });
-        }
+        const membershipState = String(m?.membershipState || m?.membership_state || m?.status || '').trim().toLowerCase();
+        const coachState = String(m?.coachState || m?.coach_state || '').trim().toLowerCase();
+
+        const gymActive = (st0?.membershipState === 'active') || (membershipState === 'active') || isDateActive(gymUntil);
+        const coachActive = (st0?.coachActive === true) || (coachState === 'active') || isDateActive(coachUntil);
+
+        const st = {
+          ...(st0 || {}),
+          membershipEnd: gymUntil,
+          coachEnd: coachUntil,
+          membershipState: gymActive ? 'active' : (st0?.membershipState || membershipState || ''),
+          coachActive,
+        };
+
+        if (gymActive) outGym.push({ member: m, memberId, st });
+        if (coachActive) outCoach.push({ member: m, memberId, st });
       }
       return { gym: outGym, coach: outCoach };
     } catch (e) {
@@ -480,73 +439,6 @@ export default function Dashboard() {
     });
   }, [useFirestore, paymentsToday, payments, members, paymentsModalKind]);
 
-  const monthlyPayments = useMemo(() => {
-    const base = useFirestore ? (paymentsMonth || []) : (payments || []);
-    const candidates = (p) => p.timestamp || p.created || p.paid_on || p.createdAt || p.date || p.Date || p.pay_date || null;
-    const toDate = (v) => {
-      try {
-        if (!v && v !== 0) return null;
-        if (v instanceof Date) return v;
-        if (typeof v === 'number') return new Date(v);
-        if (v && typeof v.seconds === 'number') return new Date(v.seconds * 1000);
-        return new Date(v);
-      } catch (e) { return null; }
-    };
-    const parseTs = (v) => {
-      try {
-        const d = toDate(v);
-        if (!d || isNaN(d)) return 0;
-        return d.getTime();
-      } catch (e) { return 0; }
-    };
-
-    const filtered = (base || []).filter(p => {
-      const d = toDate(candidates(p));
-      if (!d || isNaN(d)) return false;
-      return monthKeyForDate(d) === String(selectedMonthKey || '');
-    }).sort((a, b) => parseTs(candidates(b)) - parseTs(candidates(a)));
-
-    const total = filtered.reduce((sum, p) => sum + (parseFloat(p.Cost || p.amount || 0) || 0), 0);
-
-    const rows = filtered.map((p, idx) => {
-      const pid = String(p.MemberID || p.member_id || p.id || p.member || '').trim();
-      const member = (members || []).find(m => {
-        if (!pid) return false;
-        return String(m.MemberID || m.member_id || m.id || '').trim() === pid;
-      });
-      const pills = member ? getMemberPills(member) : [];
-      const paidRaw = candidates(p);
-      return (
-        <tr
-          key={idx}
-          className={pid ? 'row-link' : undefined}
-          style={pid ? { cursor: 'pointer' } : undefined}
-          onClick={() => {
-            if (!pid) return;
-            navigate(`/members/${encodeURIComponent(pid)}`, { state: { row: member || undefined } });
-          }}
-        >
-          <td>{display(fmtDateTime(paidRaw))}</td>
-          <td>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-              <span>{displayName(member)}</span>
-              {pills.length > 0 && (
-                <span style={{ display: 'inline-flex', gap: 6 }}>
-                  {pills.map(p => <span key={p.key} className={`pill ${p.className}`}>{p.label}</span>)}
-                </span>
-              )}
-            </span>
-          </td>
-          <td>{display(p.Particulars || p.particulars || p.type || p.item || p.category || p.product || p.paymentfor || p.plan || p.description)}</td>
-          <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>{display(p.Mode || p.mode || p.method)}</td>
-          <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{display((parseFloat(p.Cost||p.amount||0) || 0).toLocaleString())}</td>
-        </tr>
-      );
-    });
-
-    return { total, rows };
-  }, [useFirestore, paymentsMonth, payments, members, selectedMonthKey]);
- 
 
   useEffect(() => {
     if (useFirestore) {
@@ -808,23 +700,6 @@ export default function Dashboard() {
     return () => { unsub(); unsub2(); clearInterval(pollInterval); };
   }, [useFirestore]);
 
-  // Firestore: subscribe payments for selected month so Monthly Revenue only updates on new adds/changes.
-  useEffect(() => {
-    if (!useFirestore) return;
-    let alive = true;
-    let unsub = null;
-    try {
-      unsub = listenPaymentsForMonth(selectedMonthKey, (rows) => {
-        if (!alive) return;
-        setPaymentsMonth(rows || []);
-      }, () => {});
-    } catch (e) { /* ignore */ }
-    return () => {
-      alive = false;
-      try { unsub && unsub(); } catch (e) {}
-    };
-  }, [useFirestore, selectedMonthKey]);
-
   // Recompute stats whenever key data changes so UI (checked-in count etc.) updates immediately
   useEffect(() => {
     try {
@@ -1013,7 +888,10 @@ export default function Dashboard() {
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { setPaymentsModalKind('cash'); setOpenPaymentsModal(true); } }}
             style={{ cursor: 'pointer' }}
           >
-            <div className="dashboard-label">Cash Revenue</div>
+            <div className="dashboard-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+              <span>Cash Revenue</span>
+              <span className="pill white">View</span>
+            </div>
             <div className="dashboard-value magenta">₱ {stats.cashToday.toLocaleString()}</div>
           </div>
           <div
@@ -1024,7 +902,10 @@ export default function Dashboard() {
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { setPaymentsModalKind('gcash'); setOpenPaymentsModal(true); } }}
             style={{ cursor: 'pointer' }}
           >
-            <div className="dashboard-label">GCash Revenue</div>
+            <div className="dashboard-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+              <span>GCash Revenue</span>
+              <span className="pill white">View</span>
+            </div>
             <div className="dashboard-value magenta">₱ {stats.gcashToday.toLocaleString()}</div>
           </div>
           <div
@@ -1035,7 +916,10 @@ export default function Dashboard() {
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { setPaymentsModalKind('all'); setOpenPaymentsModal(true); } }}
             style={{ cursor: 'pointer' }}
           >
-            <div className="dashboard-label">Total Revenue</div>
+            <div className="dashboard-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+              <span>Total Revenue</span>
+              <span className="pill white">View</span>
+            </div>
             <div className="dashboard-value magenta">₱ { (stats.totalPaymentsToday || 0).toLocaleString() }</div>
           </div>
         </div>
@@ -1187,49 +1071,6 @@ export default function Dashboard() {
           </div>
         </ModalWrapper>
 
-        {/* Monthly Revenue */}
-        <div style={{ marginTop: 24 }} className="panel">
-          <div className="panel-header">Monthly Revenue</div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: 12, flexWrap: 'wrap' }}>
-            <select
-              value={selectedMonthKey}
-              onChange={(e) => setSelectedMonthKey(e.target.value)}
-              style={{ width: 260, height: 44, padding: '8px 12px', border: '1px solid #e7e8ef', borderRadius: 10, fontSize: 16 }}
-            >
-              {monthOptions.map(opt => (
-                <option key={opt.key} value={opt.key}>{opt.label}</option>
-              ))}
-            </select>
-            <div style={{ fontSize: 18, fontWeight: 700 }}>
-              Total Revenue = ₱ {Number(monthlyPayments.total || 0).toLocaleString()}
-            </div>
-          </div>
-          <table className="aligned payments-table">
-            <colgroup>
-              <col style={{ width: '24%' }} />
-              <col style={{ width: '24%' }} />
-              <col style={{ width: '24%' }} />
-              <col style={{ width: '14%' }} />
-              <col style={{ width: '14%' }} />
-            </colgroup>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Nickname</th>
-                <th>Particulars</th>
-                <th style={{ textAlign: 'center' }}>Mode</th>
-                <th style={{ textAlign: 'right' }}>Cost</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(!monthlyPayments.rows || monthlyPayments.rows.length === 0) ? (
-                <tr><td colSpan={5}>-</td></tr>
-              ) : (
-                monthlyPayments.rows
-              )}
-            </tbody>
-          </table>
-        </div>
         {loading && <div style={{marginTop:24}}>Loading…</div>}
       </div>
   );

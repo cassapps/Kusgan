@@ -7,6 +7,7 @@ import { ensureFirebase } from './lib/firebase';
 
 import Nav from "./components/Nav";
 import Dashboard from "./pages/Dashboard";
+import Reports from "./pages/Reports";
 import Members from "./pages/Members";
 import MemberDetail from "./pages/MemberDetail";
 import CheckIn from "./pages/CheckIn";
@@ -81,6 +82,7 @@ export default function App() {
       <div className="main-content">
         <Routes>
           <Route path="/" element={<Dashboard />} />
+          <Route path="/reports" element={<Reports />} />
           <Route path="/attendance" element={<StaffAttendance />} />
           <Route path="/members" element={<Members />} />
           {/* Canonical member detail route */}
