@@ -51,7 +51,7 @@ export default function EditMemberModal({ open, onClose, member, onSaved }) {
     email: "",
     mobile: "",
     validId: "",
-    student: false,
+    discount: "na",
   });
   const [existingId, setExistingId] = useState("");
   const [existingPhotoUrl, setExistingPhotoUrl] = useState("");
@@ -122,7 +122,14 @@ export default function EditMemberModal({ open, onClose, member, onSaved }) {
             const email = pickVal(fresh, "Email", "email");
             const mobile = pickVal(fresh, "Mobile", "Phone", "mobile", "phone");
             const validId = pickVal(fresh, "ValidID", "Valid Id", "Valid ID", "validId", "valid_id");
-            const student = String(pickVal(fresh, "Student", "student") || "").toLowerCase().startsWith("y");
+            const rawDiscount = pickVal(fresh, "Discount", "discount", "discount_rate", "discountRate", "DiscountRate", "discount_type", "discountType") || '';
+            let discount = String(rawDiscount || '').trim().toLowerCase();
+            if (!discount || discount === 'n/a' || discount === 'na' || discount === 'none') discount = 'na';
+            else if (discount.includes('student')) discount = 'student';
+            else if (discount.includes('special')) discount = 'special';
+            else discount = 'na';
+            const legacyStudent = String(pickVal(fresh, "Student", "student") || "").toLowerCase().startsWith("y");
+            if (discount === 'na' && legacyStudent) discount = 'student';
             const photo = pickVal(fresh, "PhotoURL", "photoUrl", "photo_url", "photo");
             const normalized = photo ? driveThumb(driveImg(photo)) : "";
             setExistingPhotoUrl(photo || "");
@@ -143,7 +150,7 @@ export default function EditMemberModal({ open, onClose, member, onSaved }) {
               email: String(email || ""),
               mobile: String(mobile || ""),
               validId: String(validId || ""),
-              student,
+              discount,
             });
             initializedRef.current = true;
             return;
@@ -167,7 +174,14 @@ export default function EditMemberModal({ open, onClose, member, onSaved }) {
         const email = pickVal(row, "Email", "email");
         const mobile = pickVal(row, "Mobile", "Phone", "mobile", "phone");
         const validId = pickVal(row, "ValidID", "Valid Id", "Valid ID", "validId", "valid_id");
-        const student = String(pickVal(row, "Student", "student") || "").toLowerCase().startsWith("y");
+        const rawDiscount = pickVal(row, "Discount", "discount", "discount_rate", "discountRate", "DiscountRate", "discount_type", "discountType") || '';
+        let discount = String(rawDiscount || '').trim().toLowerCase();
+        if (!discount || discount === 'n/a' || discount === 'na' || discount === 'none') discount = 'na';
+        else if (discount.includes('student')) discount = 'student';
+        else if (discount.includes('special')) discount = 'special';
+        else discount = 'na';
+        const legacyStudent = String(pickVal(row, "Student", "student") || "").toLowerCase().startsWith("y");
+        if (discount === 'na' && legacyStudent) discount = 'student';
         const photo = pickVal(row, "PhotoURL", "photoUrl", "photo_url", "photo");
         const normalized = photo ? driveThumb(driveImg(photo)) : "";
         setExistingPhotoUrl(photo || "");
@@ -188,7 +202,7 @@ export default function EditMemberModal({ open, onClose, member, onSaved }) {
           email: String(email || ""),
           mobile: String(mobile || ""),
           validId: String(validId || ""),
-          student,
+          discount,
         });
         initializedRef.current = true;
       }
@@ -198,8 +212,8 @@ export default function EditMemberModal({ open, onClose, member, onSaved }) {
 
   const onChange = (e) => {
     const { name, value, type, checked } = e.target;
-    if (name === "student-select") {
-      setForm((s) => ({ ...s, student: String(value) === "Yes" }));
+    if (name === "discount-select") {
+      setForm((s) => ({ ...s, discount: String(value) || 'na' }));
       return;
     }
     if (name === "municipality") {
@@ -280,6 +294,7 @@ export default function EditMemberModal({ open, onClose, member, onSaved }) {
       norm(a.Email) === norm(b.Email) &&
       norm(a.Mobile) === norm(b.Mobile) &&
       norm(a.ValidID) === norm(b.ValidID) &&
+      norm(a.Discount) === norm(b.Discount) &&
       norm(a.Student) === norm(b.Student)
     );
   };
@@ -304,7 +319,9 @@ export default function EditMemberModal({ open, onClose, member, onSaved }) {
       Email: form.email.trim(),
       Mobile: form.mobile.trim(),
       ValidID: form.validId.trim(),
-      Student: form.student ? "Yes" : "No",
+      Discount: form.discount === 'student' ? 'Student Rate' : (form.discount === 'special' ? 'Special Rate' : 'N/A'),
+      // legacy field (keep for older UI/data expectations)
+      Student: form.discount === 'student' ? "Yes" : "No",
       // If user picked a new photo, use the local preview so the card updates immediately.
       PhotoURL: photoPreview || existingPhotoUrl || "",
     };
@@ -433,17 +450,18 @@ export default function EditMemberModal({ open, onClose, member, onSaved }) {
 
           {/* Fields: arranged by rows as requested */}
           <div style={{ display: "grid", gap: 12 }}>
-            {/* Row 1: Valid ID, Student */}
+            {/* Row 1: Valid ID, Discount */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 160px', gap: 12, alignItems: 'end' }}>
               <label className="field" style={{ margin: 0 }}>
                 <span className="label">Valid ID *</span>
                 <input name="validId" value={form.validId} onChange={onChange} required />
               </label>
               <label className="field" style={{ margin: 0 }}>
-                <span className="label">Student</span>
-                <select name="student-select" value={form.student ? 'Yes' : 'No'} onChange={onChange}>
-                  <option>Yes</option>
-                  <option>No</option>
+                <span className="label">Discount</span>
+                <select name="discount-select" value={form.discount} onChange={onChange}>
+                  <option value="na">N/A</option>
+                  <option value="special">Special Rate</option>
+                  <option value="student">Student Rate</option>
                 </select>
               </label>
             </div>

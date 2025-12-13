@@ -9,6 +9,7 @@ import LoadingSkeleton from '../components/LoadingSkeleton.jsx';
 import React, { Suspense } from 'react';
 import { computeStatusForMember } from '../lib/membership';
 import RefreshBadge from '../components/RefreshBadge.jsx';
+import { getMemberPills } from '../lib/discount.js';
 const AddMemberModal = React.lazy(() => import('../components/AddMemberModal.jsx'));
 
 // Simple in-memory cache for SWR-style stale-while-revalidate behavior
@@ -472,21 +473,11 @@ export default function Members() {
                   <tbody>
                     {filteredSorted.map(({ r, lastVisit, isToday, memberId }, i) => {
                       const pay = memberId ? payIdx.get(memberId) : undefined;
-                      const isStudent = yesy(firstOf(r, ["student","is_student","student?"]));
-                      let ageNum = Number(firstOf(r, ["age","years_old"]));
-                      if (isNaN(ageNum)) {
-                        const bday = firstOf(r, ["birthday","birth_date","dob"]);
-                        const d = asDate(bday);
-                        if (d) {
-                          const t = new Date();
-                          ageNum = t.getFullYear() - d.getFullYear() - ((t.getMonth()<d.getMonth() || (t.getMonth()===d.getMonth() && t.getDate()<d.getDate())) ? 1 : 0);
-                        }
-                      }
-                      const isSenior = !isNaN(ageNum) && ageNum >= 60;
                       const first = String(firstOf(r, ["first_name","firstname","first","given_name"]) ?? "");
                       const last = String(firstOf(r, ["last_name","lastname","last","surname"]) ?? "");
                       const fullName = [first, last].filter(Boolean).map(toTitleCase).join(" ");
                       const nick = String(r.nick_name ?? r.nickname ?? "").toUpperCase();
+                      const pills = getMemberPills(r);
                       // Example image optimization for member photo
                       // const photoUrl = r.photoUrl || '';
                       // const photoSrcSet = r.photoSrcSet || '';
@@ -495,8 +486,17 @@ export default function Members() {
                       const coachUntil = pay?.coachEnd || null;
                       return (
                         <tr key={i} className="row-link" onClick={() => navigate(`/members/${encodeURIComponent(memberId)}`, { state: { row: r } })} style={{ cursor: 'pointer' }}>
-                           <td style={{ textAlign: 'center' }}><strong>{nick}</strong></td>
-                           <td style={{ textAlign: 'left' }}>{fullName} <span style={{ display: 'inline-flex', gap:6, marginLeft:8 }}>{isStudent && <span className="pill student">Student</span>}{isSenior && <span className="pill senior">Senior</span>}</span></td>
+                           <td style={{ textAlign: 'center' }}>
+                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
+                               <strong>{nick}</strong>
+                               {pills.length > 0 && (
+                                 <span style={{ display: 'inline-flex', gap: 6 }}>
+                                   {pills.map(p => <span key={p.key} className={`pill ${p.className}`}>{p.label}</span>)}
+                                 </span>
+                               )}
+                             </span>
+                           </td>
+                           <td style={{ textAlign: 'left' }}>{fullName}</td>
                            {/* Example image optimization for member photo */}
                            {/* <img src={photoUrl} loading="lazy" srcSet={photoSrcSet} alt={fullName} style={{ maxWidth: 40, borderRadius: '50%' }} /> */}
                           <td style={{ textAlign: 'center' }}>{fmtDate(memberSince)}</td>
@@ -528,21 +528,11 @@ export default function Members() {
                 {({ index, style }) => {
                   const { r, lastVisit, isToday, memberId } = filteredSorted[index];
                   const pay = memberId ? payIdx.get(memberId) : undefined;
-                  const isStudent = yesy(firstOf(r, ["student","is_student","student?"]));
-                  let ageNum = Number(firstOf(r, ["age","years_old"]));
-                  if (isNaN(ageNum)) {
-                    const bday = firstOf(r, ["birthday","birth_date","dob"]);
-                    const d = asDate(bday);
-                    if (d) {
-                      const t = new Date();
-                      ageNum = t.getFullYear() - d.getFullYear() - ((t.getMonth()<d.getMonth() || (t.getMonth()===d.getMonth() && t.getDate()<d.getDate())) ? 1 : 0);
-                    }
-                  }
-                  const isSenior = !isNaN(ageNum) && ageNum >= 60;
                   const first = String(firstOf(r, ["first_name","firstname","first","given_name"]) ?? "");
                   const last = String(firstOf(r, ["last_name","lastname","last","surname"]) ?? "");
                   const fullName = [first, last].filter(Boolean).map(toTitleCase).join(" ");
                   const nick = String(r.nick_name ?? r.nickname ?? "").toUpperCase();
+                  const pills = getMemberPills(r);
                   const memberSince = resolveMemberSince(r) || asDate(firstOf(r, ["member_since","membersince","member_date","memberdate","member_date","createdat","created_at","join_date","joined","start_date"]));
                   const today = new Date();
                   const gymUntil = pay?.membershipEnd || null;
@@ -554,13 +544,17 @@ export default function Members() {
                       className="row-link"
                       onClick={() => navigate(`/members/${encodeURIComponent(memberId)}`, { state: { row: r } })}
                     >
-                      <div style={{ width: '15%', textAlign: 'center' }}><strong>{nick}</strong></div>
-                      <div style={{ width: '25%' }}>{fullName}
-                        <span style={{ display:"inline-flex", gap:6, marginLeft:8, verticalAlign:"middle" }}>
-                          {isStudent && <span className="pill student">Student</span>}
-                          {isSenior && <span className="pill senior">Senior</span>}
+                      <div style={{ width: '15%', textAlign: 'center' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
+                          <strong>{nick}</strong>
+                          {pills.length > 0 && (
+                            <span style={{ display: 'inline-flex', gap: 6 }}>
+                              {pills.map(p => <span key={p.key} className={`pill ${p.className}`}>{p.label}</span>)}
+                            </span>
+                          )}
                         </span>
                       </div>
+                      <div style={{ width: '25%' }}>{fullName}</div>
                       <div style={{ width: '15%', textAlign: 'center' }}>{fmtDate(memberSince)}</div>
                       <div style={{ width: '15%', textAlign: 'center' }}>{isToday ? <span className="pill ok">Visited today</span> : (lastVisit ? fmtDate(new Date(lastVisit)) : "")}</div>
                       <div style={{ width: '15%', textAlign: 'center', color: gymUntil ? (isDateActive(gymUntil) ? 'green' : 'red') : 'inherit' }}>{gymUntil ? fmtDate(new Date(gymUntil)) : ""}</div>

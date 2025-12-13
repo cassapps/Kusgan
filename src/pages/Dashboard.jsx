@@ -25,6 +25,7 @@ import events from "../lib/events";
 import RefreshBadge from '../components/RefreshBadge.jsx';
 import displayName from '../lib/displayName';
 import ModalWrapper from '../components/ModalWrapper.jsx';
+import { getMemberPills } from '../lib/discount.js';
 
 function todayYMD() {
   const now = new Date();
@@ -290,6 +291,7 @@ export default function Dashboard() {
     return todays.map((e, idx) => {
     const pid = String(firstOf(e, ["MemberID","memberid","member_id","member","id"]) || "").trim();
     const member = (members || []).find(m => String(firstOf(m, ["MemberID","memberid","member_id","id"]) || "").trim() === pid);
+    const pills = member ? getMemberPills(member) : [];
     const timeIn = firstOf(e, ["TimeIn","timein","time_in"]) || "";
     const timeOut = firstOf(e, ["TimeOut","timeout","time_out"]) || "";
       const isOpen = (String(timeOut).trim() === '' || String(timeOut).trim() === '-' || String(timeOut).trim() === '—');
@@ -300,6 +302,11 @@ export default function Dashboard() {
         <td className="td-fullname" style={{ textAlign: 'left' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
             <span>{displayName(member)}</span>
+            {pills.length > 0 && (
+              <span style={{ display: 'inline-flex', gap: 6 }}>
+                {pills.map(p => <span key={p.key} className={`pill ${p.className}`}>{p.label}</span>)}
+              </span>
+            )}
             {isOpen && <span className="status-badge on">On</span>}
           </span>
         </td>
@@ -435,13 +442,23 @@ export default function Dashboard() {
       if (!pid) return false;
       return String(m.MemberID || m.member_id || m.id || "").trim() === pid;
     });
+    const pills = member ? getMemberPills(member) : [];
     const gymValidRaw = p.gymvaliduntil || p.GymValidUntil || p.gym_valid_until || p.gym_until || p.EndDate || p.Enddate || p.enddate || p.end_date || p.end || p.valid_until || p.expiry || p.expires || p.until || "";
     const coachValidRaw = p.coachvaliduntil || p.CoachValidUntil || p.coach_valid_until || p.coach_until || "";
     const gymValid = fmtDate(gymValidRaw);
     const coachValid = fmtDate(coachValidRaw);
     return (
       <tr key={idx}>
-        <td>{displayName(member)}</td>
+        <td>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            <span>{displayName(member)}</span>
+            {pills.length > 0 && (
+              <span style={{ display: 'inline-flex', gap: 6 }}>
+                {pills.map(p => <span key={p.key} className={`pill ${p.className}`}>{p.label}</span>)}
+              </span>
+            )}
+          </span>
+        </td>
         <td>{display(p.Particulars || p.particulars || p.type || p.item || p.category || p.product || p.paymentfor || p.plan || p.description)}</td>
         <td>{display(gymValid)}</td>
         <td>{display(coachValid)}</td>
@@ -486,6 +503,7 @@ export default function Dashboard() {
         if (!pid) return false;
         return String(m.MemberID || m.member_id || m.id || '').trim() === pid;
       });
+      const pills = member ? getMemberPills(member) : [];
       const gymValidRaw = p.gymvaliduntil || p.GymValidUntil || p.gym_valid_until || p.gym_until || p.EndDate || p.Enddate || p.enddate || p.end_date || p.end || p.valid_until || p.expiry || p.expires || p.until || '';
       const coachValidRaw = p.coachvaliduntil || p.CoachValidUntil || p.coach_valid_until || p.coach_until || '';
       const gymValid = fmtDate(gymValidRaw);
@@ -500,7 +518,16 @@ export default function Dashboard() {
             navigate(`/members/${encodeURIComponent(pid)}`, { state: { row: member || undefined } });
           }}
         >
-          <td>{displayName(member)}</td>
+          <td>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <span>{displayName(member)}</span>
+              {pills.length > 0 && (
+                <span style={{ display: 'inline-flex', gap: 6 }}>
+                  {pills.map(p => <span key={p.key} className={`pill ${p.className}`}>{p.label}</span>)}
+                </span>
+              )}
+            </span>
+          </td>
           <td>{display(p.Particulars || p.particulars || p.type || p.item || p.category || p.product || p.paymentfor || p.plan || p.description)}</td>
           <td>{display(gymValid)}</td>
           <td>{display(coachValid)}</td>
@@ -1084,9 +1111,19 @@ export default function Dashboard() {
                     const lastVisit = lastVisitByMember.get(memberId) || null;
                     const gymUntil = st?.membershipEnd || null;
                     const coachUntil = st?.coachEnd || null;
+                    const pills = m ? getMemberPills(m) : [];
                     return (
                       <tr key={idx}>
-                        <td style={{ textAlign: 'center' }}><strong>{nick}</strong></td>
+                        <td style={{ textAlign: 'center' }}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
+                            <strong>{nick}</strong>
+                            {pills.length > 0 && (
+                              <span style={{ display: 'inline-flex', gap: 6 }}>
+                                {pills.map(p => <span key={p.key} className={`pill ${p.className}`}>{p.label}</span>)}
+                              </span>
+                            )}
+                          </span>
+                        </td>
                         <td style={{ textAlign: 'left' }}>{fullName}</td>
                         <td style={{ textAlign: 'center' }}>{fmtDate(memberSince)}</td>
                         <td style={{ textAlign: 'center' }}>{lastVisit ? fmtDate(lastVisit) : ''}</td>

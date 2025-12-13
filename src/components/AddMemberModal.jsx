@@ -22,7 +22,7 @@ export default function AddMemberModal({ open, onClose, onSaved }) {
     email: "",
     mobile: "",
     validId: "",
-    student: false,
+    discount: "na",
   });
   const [photoPreview, setPhotoPreview] = useState("");
   const [photoFile, setPhotoFile] = useState(null);
@@ -51,7 +51,7 @@ export default function AddMemberModal({ open, onClose, onSaved }) {
         email: "",
         mobile: "",
         validId: "",
-        student: false,
+        discount: "na",
       });
       setPhotoPreview("");
       setPhotoFile(null);
@@ -63,8 +63,8 @@ export default function AddMemberModal({ open, onClose, onSaved }) {
 
   const onChange = (e) => {
     const { name, value } = e.target;
-    if (name === "student-select") {
-      setForm((s) => ({ ...s, student: String(value) === "Yes" }));
+    if (name === "discount-select") {
+      setForm((s) => ({ ...s, discount: String(value) || "na" }));
       return;
     }
     if (name === "municipality") {
@@ -152,7 +152,9 @@ export default function AddMemberModal({ open, onClose, onSaved }) {
         Email: String(form.email || "").trim(),
         Mobile: String(form.mobile || "").trim(),
         ValidID: String(form.validId || "").trim(),
-        Student: form.student ? "Yes" : "No",
+        Discount: form.discount === 'student' ? 'Student Rate' : (form.discount === 'special' ? 'Special Rate' : 'N/A'),
+        // legacy field (keep for older UI/data expectations)
+        Student: form.discount === 'student' ? "Yes" : "No",
         // store photo under multiple common keys to maximize compatibility
         PhotoURL: photoUrl,
         photourl: photoUrl,
@@ -223,7 +225,7 @@ export default function AddMemberModal({ open, onClose, onSaved }) {
 
           {/* Column 2: controls */}
           <div>
-            {/* Row 0: Nick Name, Valid ID, Student */}
+            {/* Row 0: Nick Name, Valid ID, Discount */}
             <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 160px', gap: 12, alignItems: 'end' }}>
               <div className="field" style={{ margin: 0 }}>
                 <label className="label">Nick Name *</label>
@@ -234,10 +236,11 @@ export default function AddMemberModal({ open, onClose, onSaved }) {
                 <input name="validId" value={form.validId} onChange={onChange} required disabled={busy} />
               </div>
               <div className="field" style={{ margin: 0 }}>
-                <label className="label">Student</label>
-                <select name="student-select" value={form.student ? 'Yes' : 'No'} onChange={onChange} disabled={busy}>
-                  <option>No</option>
-                  <option>Yes</option>
+                <label className="label">Discount</label>
+                <select name="discount-select" value={form.discount} onChange={onChange} disabled={busy}>
+                  <option value="na">N/A</option>
+                  <option value="special">Special Rate</option>
+                  <option value="student">Student Rate</option>
                 </select>
               </div>
             </div>

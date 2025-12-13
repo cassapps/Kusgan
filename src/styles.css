@@ -442,6 +442,7 @@ table.aligned{ table-layout:fixed; margin-bottom:40px; }
 /* Badges for student/senior */
 .pill.student { color:#1e66f5; border-color:#c7d2fe; background:#edf2ff; }
 .pill.senior  { color:#ad6800; border-color:#ffe1a8; background:#fff7e6; }
+.pill.special { color:#ad6800; border-color:#ffe1a8; background:#fff7e6; }
 
 /* Small status badge used in tables to mark open entries */
 .status-badge{
