@@ -33,4 +33,11 @@ describe('pricingRules', () => {
     const ctxGym = { ...ctxNoGym, hasActiveGym: true };
     expect(isParticularsVisible('Monthly Coach Only', ctxGym)).toBe(true);
   });
+  
+  it('Unknown/legacy Particulars are hidden', () => {
+    const ctx = { hasActiveGym: false, hasActiveCoach: false, isStudent: false, isSenior: false, isSpecial: false, isOffPeak: true };
+    expect(isParticularsVisible('Daily Pass', ctx)).toBe(false);
+    expect(isParticularsVisible('Daily Coach Offpeak', { ...ctx, hasActiveGym: true })).toBe(false);
+    expect(isParticularsVisible('Some Random Product', ctx)).toBe(false);
+  });
 });

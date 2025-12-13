@@ -7,6 +7,36 @@ function normName(s) {
     .replace(/\s+/g, " ");
 }
 
+// IMPORTANT: Only these Particulars are allowed to appear in the UI.
+// Anything else (legacy/typos/old products) must be hidden.
+export const ALLOWED_PARTICULARS = [
+  // Gym membership only
+  "Daily Pass - Off Peak",
+  "Daily Pass - Peak",
+  "Daily Pass - Special",
+  "Monthly Pass - Student",
+  "Monthly Pass - Senior",
+  "Monthly Pass - Regular",
+  "Yearly Pass - Regular",
+  // Coach subscription only
+  "Daily Coach - Off Peak",
+  "Daily Coach Only",
+  "Monthly Coach Only",
+  // Gym & Coach bundle
+  "Daily Pass w/ Coach - Off Peak",
+  "Daily Pass w/ Coach",
+  "Monthly Pass w/ Coach",
+  // Merchandise
+  "Kusgan Shirt",
+  "Kusgan ID",
+];
+
+const ALLOWED_SET = new Set(ALLOWED_PARTICULARS.map(normName));
+
+export function isAllowedParticulars(particulars) {
+  return ALLOWED_SET.has(normName(particulars));
+}
+
 export function manilaTimeParts(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: MANILA_TZ,
@@ -33,6 +63,7 @@ export function effectiveValidityDays(particulars, rawValidityDays) {
 }
 
 export function isParticularsVisible(particulars, ctx) {
+  if (!isAllowedParticulars(particulars)) return false;
   const name = normName(particulars);
   const isOffPeak = !!ctx?.isOffPeak;
   const hasActiveGym = !!ctx?.hasActiveGym;
@@ -61,6 +92,6 @@ export function isParticularsVisible(particulars, ctx) {
   if (name === normName("Daily Pass w/ Coach")) return !hasActiveGym && !hasActiveCoach && !isOffPeak;
   if (name === normName("Monthly Pass w/ Coach")) return true;
 
-  // Merchandise + any other items: keep visible
+  // Merchandise (allowed) + any other allowed items not covered above
   return true;
 }
