@@ -247,7 +247,7 @@ export default function StaffAttendance() {
     } catch (e) { return []; }
   }, [rows]);
 
-  const attendancePager = useLoadMore(visibleRows, { initial: 20, step: 20, resetDeps: [selected] });
+  const attendancePager = useLoadMore(visibleRows, { initial: 20, step: 20, resetDeps: [selected, visibleRows.length] });
 
   // Filtered coaching sessions for the selected coach & period
   const coachingSessions = useMemo(() => {
@@ -274,7 +274,7 @@ export default function StaffAttendance() {
     } catch (e) { return []; }
   }, [gymVisits, periods, selectedCoach, selectedPeriodIndex]);
 
-  const coachingPager = useLoadMore(coachingSessions, { initial: 20, step: 20, resetDeps: [selectedCoach, selectedPeriodIndex] });
+  const coachingPager = useLoadMore(coachingSessions, { initial: 20, step: 20, resetDeps: [selectedCoach, selectedPeriodIndex, coachingSessions.length] });
 
   const onClock = async () => {
     if (!selected) return;

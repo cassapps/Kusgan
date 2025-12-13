@@ -397,7 +397,7 @@ export default function Reports() {
     });
   }, [paymentsMonth, revenuesMonth, members]);
 
-  const revenuePager = useLoadMore(monthlyRows, { initial: 20, step: 20, resetDeps: [selectedMonthKey] });
+  const revenuePager = useLoadMore(monthlyRows, { initial: 20, step: 20, resetDeps: [selectedMonthKey, revCollapsed] });
 
   const expenseRows = useMemo(() => {
     const candidates = (e) => e.timestamp || e.created || e.createdAt || e.date || e.Date || null;
@@ -423,7 +423,7 @@ export default function Reports() {
     });
   }, [expensesMonth]);
 
-  const expensesPager = useLoadMore(expenseRows, { initial: 20, step: 20, resetDeps: [selectedMonthKey] });
+  const expensesPager = useLoadMore(expenseRows, { initial: 20, step: 20, resetDeps: [selectedMonthKey, expCollapsed] });
 
   const resetRevenueForm = () => {
     setRevenueForm({ Date: manilaTodayYMD(), Category: "Grocery", Particulars: "", Mode: "Cash", Cost: "" });
