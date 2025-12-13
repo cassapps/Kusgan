@@ -3,6 +3,7 @@ import api from "../api";
 const { addPayment, fetchPricing, fetchPayments } = api;
 import ModalWrapper from "./ModalWrapper";
 import events from "../lib/events";
+import { effectiveValidityDays, isManilaOffPeak, isParticularsVisible } from "../lib/pricingRules";
 
 const MANILA_TZ = "Asia/Manila";
 
@@ -105,12 +106,20 @@ const addDaysYMD = (startYMD, days = 0) => {
   }).format(utc);
 };
 
-export default function PaymentModal({ open, onClose, memberId, onSaved, membershipEnd, coachEnd, isStudent, birthDate }) {
+export default function PaymentModal({ open, onClose, memberId, onSaved, membershipEnd, coachEnd, isStudent, birthDate, isSpecial }) {
   const [pricing, setPricing] = useState([]);
   const [busy, setBusy] = useState(false);
   const [memberPayments, setMemberPayments] = useState([]);
   const [form, setForm] = useState({ Particulars: "", Mode: "", Cost: "", StartDate: "", EndDate: "" });
   const [error, setError] = useState("");
+  const [nowTick, setNowTick] = useState(0);
+
+  // Refresh time-window logic while the modal is open.
+  useEffect(() => {
+    if (!open) return;
+    const id = setInterval(() => setNowTick((t) => t + 1), 30_000);
+    return () => clearInterval(id);
+  }, [open]);
 
   // Load pricing (Firestore -> { rows }) and fall back to legacy /api/products when needed
   useEffect(() => {
@@ -209,75 +218,40 @@ export default function PaymentModal({ open, onClose, memberId, onSaved, members
     return age >= 60;
   }, [birthDate]);
 
-  // Manila hour detection and window flags
-  const { manilaHour, isOffPeakWindow, isDailyWindow } = useMemo(() => {
-    const parts = new Intl.DateTimeFormat("en-US", { timeZone: MANILA_TZ, hour12: false, hour: "2-digit" }).formatToParts(new Date());
-    const hour = Number(parts.find((p) => p.type === "hour")?.value || "0");
-    // Off-peak window: 06:00 - 14:59 (6am-3pm exclusive)
-    const off = hour >= 6 && hour < 15;
-    // Daily peak window: 15:00 - 21:59 (3pm-10pm exclusive)
-    const daily = hour >= 15 && hour < 22;
-    return { manilaHour: hour, isOffPeakWindow: off, isDailyWindow: daily };
-  }, []);
+  // Manila window flag
+  const isOffPeak = useMemo(() => isManilaOffPeak(new Date()), [nowTick]);
 
-  // Filter pricing based on eligibility rules
+  const hasActiveGym = useMemo(() => {
+    try {
+      if (!membershipEnd) return false;
+      const today = manilaTodayYMD();
+      const ymd = toManilaYMD(membershipEnd);
+      return !!ymd && ymd >= today;
+    } catch {
+      return false;
+    }
+  }, [membershipEnd]);
+
+  const hasActiveCoach = useMemo(() => {
+    try {
+      if (!coachEnd) return false;
+      const today = manilaTodayYMD();
+      const ymd = toManilaYMD(coachEnd);
+      return !!ymd && ymd >= today;
+    } catch {
+      return false;
+    }
+  }, [coachEnd]);
+
+  // Filter pricing based on eligibility rules (visibility rules from pricing sheet)
   const filteredPricing = useMemo(() => {
-    const canDiscount = !!(isStudent || isSenior);
+    const ctx = { hasActiveGym, hasActiveCoach, isStudent: !!isStudent, isSenior: !!isSenior, isSpecial: !!isSpecial, isOffPeak };
     return (pricing || []).filter((p) => {
-      const name = String(p.Particulars || "").trim();
-      const lower = name.toLowerCase();
-      const isDiscounted = /(student|senior|discount|disc)/i.test(name);
-      const isOffPeak = /off\s*-?\s*peak|offpeak/i.test(name);
-      const isDaily = /\bdaily\b|daily\s*pass|1[- ]?day/i.test(name);
-      const flags = getFlags(p);
-
-      // Discount items: require eligibility
-      if (isDiscounted && !canDiscount) return false;
-
-      // Compute current membership/coach active flags (compare dates by day)
-      const memberHasActiveMembership = (() => {
-        try {
-          if (!membershipEnd) return false;
-          const d = new Date(membershipEnd);
-          d.setHours(0,0,0,0);
-          const today = new Date(); today.setHours(0,0,0,0);
-          return d >= today;
-        } catch (e) { return false; }
-      })();
-      const coachActiveNow = (() => {
-        try {
-          if (!coachEnd) return false;
-          const d = new Date(coachEnd);
-          d.setHours(0,0,0,0);
-          const today = new Date(); today.setHours(0,0,0,0);
-          return d >= today;
-        } catch (e) { return false; }
-      })();
-
-      // Daily categories
-      const isDailyGymOnly = isDaily && flags.gym && !flags.coach;
-      const isDailyCoachOnly = isDaily && flags.coach && !flags.gym;
-      const isDailyBundle = isDaily && flags.gym && flags.coach;
-
-      // Apply rules per type:
-      // - Daily gym-only: hide only if member has active gym membership
-      if (isDailyGymOnly && memberHasActiveMembership) return false;
-      // - Daily coach-only: hide only if member has active coach subscription
-      if (isDailyCoachOnly && coachActiveNow) return false;
-      // - Daily bundle: hide if either gym OR coach active
-      if (isDailyBundle && (memberHasActiveMembership || coachActiveNow)) return false;
-
-      // Off-peak items only visible in off-peak window
-      // Exception: coach-only daily passes are available anytime (they're coach sessions)
-      if (isOffPeak && !isOffPeakWindow && !(isDaily && flags.coach && !flags.gym)) return false;
-
-      // Non-offpeak daily (regular daily) only visible in daily window
-      // Exception: coach-only daily passes are available anytime
-      if (isDaily && !isOffPeak && !isDailyWindow && !(flags.coach && !flags.gym)) return false;
-
-      return true;
+      const name = String(p?.Particulars || "").trim();
+      if (!name) return false;
+      return isParticularsVisible(name, ctx);
     });
-  }, [pricing, isStudent, isSenior, isOffPeakWindow, isDailyWindow, membershipEnd, coachEnd]);
+  }, [pricing, hasActiveGym, hasActiveCoach, isStudent, isSenior, isSpecial, isOffPeak]);
 
   // Clear selection if it becomes ineligible due to filters
   useEffect(() => {
@@ -307,7 +281,7 @@ export default function PaymentModal({ open, onClose, memberId, onSaved, members
   const onParticulars = (val) => {
     const item = (filteredPricing || []).find((r) => String(r.Particulars) === String(val));
     const cost = item ? (parseFloat(item.Cost) || 0).toFixed(2) : "";
-    const validity = item ? Number(item.Validity || 0) : 0;
+    const validity = item ? effectiveValidityDays(item.Particulars, item.Validity) : 0;
     const flags = getFlags(item);
     // Promo: if this is a daily pass and the member has availed the exact same pass >=12 times in the last 30 days,
     // the next one is free.
@@ -378,7 +352,7 @@ export default function PaymentModal({ open, onClose, memberId, onSaved, members
 
   const onStartDate = (start) => {
     const item = (filteredPricing || []).find((r) => String(r.Particulars) === String(form.Particulars));
-    const validity = item ? Number(item.Validity || 0) : 0;
+    const validity = item ? effectiveValidityDays(item.Particulars, item.Validity) : 0;
     setForm((f) => ({ ...f, StartDate: start, EndDate: validity ? endDateFrom(start, validity) : "" }));
   };
 
@@ -394,45 +368,12 @@ export default function PaymentModal({ open, onClose, memberId, onSaved, members
     try {
       // Derive the resulting new valid-until dates for gym/coach based on the selected item
       const item = (filteredPricing || []).find((r) => String(r.Particulars) === String(form.Particulars));
-      const validity = item ? Number(item.Validity || 0) : 0;
+      if (!item) throw new Error("Selected Particulars is not available.");
+      const validity = effectiveValidityDays(item.Particulars, item.Validity);
       const flags = getFlags(item);
-      // Additional client-side validation for special rules
-      const itemName = String(item?.Particulars || "").toLowerCase();
-      const isDailyItem = /\bdaily\b|daily\s*pass|1[- ]?day/i.test(itemName);
-      const isOffPeakItem = /off\s*-?\s*peak|offpeak/i.test(itemName);
-
-      // membership active check
-      const memberHasActiveMembership = (() => {
-        try { if (!membershipEnd) return false; const d = new Date(membershipEnd); d.setHours(0,0,0,0); const today = new Date(); today.setHours(0,0,0,0); return d >= today; } catch(e){return false}
-      })();
-      if (isDailyItem && memberHasActiveMembership) {
-        setError('Daily pass not allowed: member has active membership');
-        setBusy(false);
-        return;
-      }
-
-      // Time-window checks (Manila)
-      if (isDailyItem && !isOffPeakItem) {
-        if (!isDailyWindow) {
-          setError('Daily pass only available 3pm-10pm (Manila time)');
-          setBusy(false);
-          return;
-        }
-      }
-      if (isOffPeakItem) {
-        if (!isOffPeakWindow) {
-          setError('Off-peak pass only available 6am-3pm (Manila time)');
-          setBusy(false);
-          return;
-        }
-      }
-
-      // Coach session restriction: disallow if coach subscription already active
-      const coachActiveNow = (() => {
-        try { if (!coachEnd) return false; const d = new Date(coachEnd); d.setHours(0,0,0,0); const today = new Date(); today.setHours(0,0,0,0); return d >= today; } catch(e){return false} }
-      )();
-      if (flags.coach && coachActiveNow) {
-        setError('Coach session not allowed: member has active coach subscription');
+      const ctx = { hasActiveGym, hasActiveCoach, isStudent: !!isStudent, isSenior: !!isSenior, isSpecial: !!isSpecial, isOffPeak };
+      if (!isParticularsVisible(item.Particulars, ctx)) {
+        setError('This Particulars is not available right now.');
         setBusy(false);
         return;
       }
@@ -526,7 +467,7 @@ export default function PaymentModal({ open, onClose, memberId, onSaved, members
             {form.Particulars && (() => {
               const item = (filteredPricing || []).find((r) => String(r.Particulars) === String(form.Particulars));
               const flags = getFlags(item);
-              const validity = item ? Number(item.Validity || 0) : 0;
+              const validity = item ? effectiveValidityDays(item.Particulars, item.Validity) : 0;
               if (!validity) return null;
               const today = manilaTodayYMD();
               const gymCurrent = membershipEnd ? toManilaYMD(membershipEnd) : "";

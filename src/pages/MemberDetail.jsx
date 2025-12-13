@@ -580,6 +580,7 @@ export default function MemberDetail() {
         coachEnd={status.coachEnd}
         isStudent={isStudent}
         birthDate={bday}
+        isSpecial={pills.some(p => p.key === 'special')}
       />
 
       {/* Admin-only payment actions modal (edit/delete) */}
