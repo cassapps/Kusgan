@@ -416,9 +416,10 @@ export default function Members() {
       };
     });
 
-    // FIRST: show only active members (active gym OR active coach)
-    const activeOnly = withVisit.filter((x) => x.isActive);
-    const searched = activeOnly.filter((x) => x.matches);
+    // Default view: show only active members (active gym OR active coach).
+    // Search view: show all matching members (active or not).
+    const base = term ? withVisit : withVisit.filter((x) => x.isActive);
+    const searched = base.filter((x) => x.matches);
 
     searched.sort((a, b) => (b.joinTs - a.joinTs) || (b.visitTs - a.visitTs));
     return searched;
@@ -452,9 +453,11 @@ export default function Members() {
         <button className="button" onClick={() => setOpenAdd(true)}>+ Add Member</button>
       </div>
 
-      <div style={{ textAlign: 'center', color: 'var(--muted)', marginBottom: 12 }}>
-        Showing members with active membership...
-      </div>
+      {!debouncedQ && (
+        <div style={{ textAlign: 'left', color: 'var(--muted)', marginBottom: 12 }}>
+          Showing members with active membership...
+        </div>
+      )}
 
       {/* Top loading toast removed — table shows its own inline Loading message */}
   {loading && (<div style={{ color: 'var(--muted)', textAlign: 'center', padding: 16 }}>Loading…</div>)}
