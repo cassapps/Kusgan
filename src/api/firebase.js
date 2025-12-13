@@ -3,6 +3,7 @@
 // the existing Sheets API to make switching imports easier.
 
 import fb from '../lib/firebase';
+import { serverTimestamp } from 'firebase/firestore';
 
 // Collections mapping
 const COLS = {
@@ -24,6 +25,25 @@ function manilaYMD(d) {
       month: '2-digit',
       day: '2-digit',
     }).format(date);
+  } catch (e) {
+    return '';
+  }
+}
+
+function manilaHM(d) {
+  try {
+    const date = d instanceof Date ? d : new Date(d);
+    if (!date || isNaN(date)) return '';
+    // 24-hour HH:mm in Asia/Manila
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Manila',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(date);
+    const hh = parts.find(p => p.type === 'hour')?.value || '';
+    const mm = parts.find(p => p.type === 'minute')?.value || '';
+    return (hh && mm) ? `${hh}:${mm}` : '';
   } catch (e) {
     return '';
   }
@@ -891,14 +911,30 @@ export async function deletePayment(paymentId) {
   return { ok: true, id };
 }
 export async function addPayment(payload) {
-  const r = await fb.addDocument(COLS.payments, payload);
+  const now = new Date();
+  const safe = { ...(payload || {}) };
+
+  // Always capture an actual time for new payments going forward.
+  // - `timestamp` is used by UI as preferred source for date+time.
+  // - Keep legacy `Date`/`Time` fields (used by some range queries and displays).
+  const hasTimestampLike = Boolean(
+    safe.timestamp || safe.created || safe.createdAt || safe.paid_on || safe.date
+  );
+  if (!hasTimestampLike) {
+    safe.timestamp = serverTimestamp();
+    safe.created = safe.timestamp;
+  }
+  if (!safe.Date) safe.Date = manilaYMD(now);
+  if (!safe.Time) safe.Time = manilaHM(now);
+
+  const r = await fb.addDocument(COLS.payments, safe);
 
   // Denormalize validity onto member doc so Dashboard/Members can render without scanning payments.
   try {
-    const mid = String(payload?.MemberID || payload?.memberId || payload?.memberid || payload?.member || '').trim();
+    const mid = String(safe?.MemberID || safe?.memberId || safe?.memberid || safe?.member || '').trim();
     if (mid) {
-      const gymUntil = String(payload?.membershipEnd || payload?.MembershipEnd || payload?.GymValidUntil || payload?.gymvaliduntil || payload?.gym_valid_until || payload?.gym_until || payload?.EndDate || payload?.enddate || payload?.end_date || payload?.valid_until || payload?.expiry || payload?.expires || payload?.until || '').trim();
-      const coachUntil = String(payload?.coachEnd || payload?.CoachEnd || payload?.CoachValidUntil || payload?.coachvaliduntil || payload?.coach_valid_until || payload?.coach_until || '').trim();
+      const gymUntil = String(safe?.membershipEnd || safe?.MembershipEnd || safe?.GymValidUntil || safe?.gymvaliduntil || safe?.gym_valid_until || safe?.gym_until || safe?.EndDate || safe?.enddate || safe?.end_date || safe?.valid_until || safe?.expiry || safe?.expires || safe?.until || '').trim();
+      const coachUntil = String(safe?.coachEnd || safe?.CoachEnd || safe?.CoachValidUntil || safe?.coachvaliduntil || safe?.coach_valid_until || safe?.coach_until || '').trim();
 
       const patch = {};
       if (gymUntil) {

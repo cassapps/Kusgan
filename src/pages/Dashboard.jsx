@@ -418,7 +418,7 @@ export default function Dashboard() {
   const paymentRows = useMemo(() => {
     const base = useFirestore ? (paymentsToday || []) : (payments || []);
     const today = todayYMD();
-    const candidates = (p) => p.Date || p.date || p.pay_date || p.created || p.timestamp || null;
+    const candidates = (p) => p.timestamp || p.created || p.paid_on || p.createdAt || p.date || p.Date || p.pay_date || null;
     const parseTs = (v) => {
       if (!v && v !== 0) return 0;
       if (typeof v === 'number') return v;
@@ -473,7 +473,7 @@ export default function Dashboard() {
 
   const monthlyPayments = useMemo(() => {
     const base = useFirestore ? (paymentsMonth || []) : (payments || []);
-    const candidates = (p) => p.Date || p.date || p.pay_date || p.created || p.timestamp || null;
+    const candidates = (p) => p.timestamp || p.created || p.paid_on || p.createdAt || p.date || p.Date || p.pay_date || null;
     const toDate = (v) => {
       try {
         if (!v && v !== 0) return null;
@@ -1165,11 +1165,11 @@ export default function Dashboard() {
           </div>
           <table className="aligned payments-table">
             <colgroup>
-              <col style={{ width: 180 }} />
-              <col style={{ width: 180 }} />
-              <col />
-              <col style={{ width: 90 }} />
-              <col style={{ width: 90 }} />
+              <col style={{ width: '24%' }} />
+              <col style={{ width: '24%' }} />
+              <col style={{ width: '24%' }} />
+              <col style={{ width: '14%' }} />
+              <col style={{ width: '14%' }} />
             </colgroup>
             <thead>
               <tr>
