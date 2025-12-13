@@ -434,7 +434,7 @@ table.aligned{ table-layout:fixed; margin-bottom:40px; }
 /* ---------- Status chips ---------- */
 .pill{
   display:inline-block; padding:6px 10px; border-radius:999px;
-  font-size:15px; border:1px solid transparent; font-weight:800;
+  font-size:12px; border:1px solid transparent; font-weight:500;
 }
 .pill.ok{ color:#2f9e44; border-color:#b7efc5; background:#e9f8ee; }
 .pill.bad{ color:#d64545; border-color:#f3b3b3; background:#fdecec; }

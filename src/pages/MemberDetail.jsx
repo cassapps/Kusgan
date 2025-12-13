@@ -19,6 +19,7 @@ import CheckInConfirmModal from "../components/CheckInConfirmModal";
 import events from "../lib/events";
 import { computeStatusForMember } from '../lib/membership';
 import displayName from '../lib/displayName';
+import { getMemberPills } from '../lib/discount.js';
 
 const toKey = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, "_");
 const norm = (row) => Object.fromEntries(Object.entries(row || {}).map(([k, v]) => [toKey(k), v]));
@@ -155,6 +156,8 @@ export default function MemberDetail() {
   const photoRaw = firstOf(member, ["photourl","photo_url","photo"]);
   const photoUrl = driveImg(photoRaw);
   const photoSrc = driveThumb(photoUrl);
+
+  const pills = getMemberPills(member || {});
 
   const [openPayment, setOpenPayment] = useState(false);
   const [openEdit, setOpenEdit] = useState(false);
@@ -523,6 +526,11 @@ export default function MemberDetail() {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, marginBottom: 8 }}>
           <h2 style={{ margin: 0 }}>{display(displayName(member) || nick || firstName || "Member")}</h2>
+          {pills.length > 0 && (
+            <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+              {pills.map(p => <span key={p.key} className={`pill ${p.className}`}>{p.label}</span>)}
+            </span>
+          )}
           <div><RefreshBadge show={isRefreshing && !loading} /></div>
         </div>
       </div>
