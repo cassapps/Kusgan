@@ -61,8 +61,8 @@ const fmtTime = (t) => {
 };
 const fmtDate = (d) => {
   if (!d) return "-";
-  const date = d instanceof Date ? d : new Date(d);
-  if (isNaN(date)) return "-";
+  const date = asDate(d);
+  if (!date) return "-";
   const parts = new Intl.DateTimeFormat("en-US", { timeZone: MANILA_TZ, month: "short", day: "numeric", year: "numeric" }).formatToParts(date);
   const m = parts.find((p) => p.type === "month")?.value || "";
   const day = parts.find((p) => p.type === "day")?.value || "";
@@ -72,8 +72,8 @@ const fmtDate = (d) => {
 
 const fmtDateTime = (d) => {
   if (!d) return "-";
-  const date = d instanceof Date ? d : new Date(d);
-  if (isNaN(date)) return "-";
+  const date = asDate(d);
+  if (!date) return "-";
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: MANILA_TZ,
     month: "short",

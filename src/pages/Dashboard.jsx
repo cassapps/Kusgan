@@ -172,6 +172,19 @@ export default function Dashboard() {
     return map;
   }, [paymentsActive]);
 
+  const lastVisitByMember = useMemo(() => {
+    const map = new Map();
+    for (const e of (gymEntries || [])) {
+      const id = String(e?.MemberID || e?.member_id || e?.id || e?.member || '').trim();
+      if (!id) continue;
+      const d = parseMaybeDate(e?.Date || e?.date || e?.Timestamp || e?.timestamp || e?.created || e?.TimeIn || null);
+      if (!d) continue;
+      const prev = map.get(id);
+      if (!prev || d > prev) map.set(id, d);
+    }
+    return map;
+  }, [gymEntries]);
+
   const activeMembers = useMemo(() => {
     try {
       const pick = (o, keys) => {
