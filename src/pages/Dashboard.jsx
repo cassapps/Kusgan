@@ -507,10 +507,6 @@ export default function Dashboard() {
       });
       const pills = member ? getMemberPills(member) : [];
       const paidRaw = candidates(p);
-      const gymValidRaw = p.gymvaliduntil || p.GymValidUntil || p.gym_valid_until || p.gym_until || p.EndDate || p.Enddate || p.enddate || p.end_date || p.end || p.valid_until || p.expiry || p.expires || p.until || '';
-      const coachValidRaw = p.coachvaliduntil || p.CoachValidUntil || p.coach_valid_until || p.coach_until || '';
-      const gymValid = fmtDate(gymValidRaw);
-      const coachValid = fmtDate(coachValidRaw);
       return (
         <tr
           key={idx}
@@ -533,8 +529,6 @@ export default function Dashboard() {
             </span>
           </td>
           <td>{display(p.Particulars || p.particulars || p.type || p.item || p.category || p.product || p.paymentfor || p.plan || p.description)}</td>
-          <td>{display(gymValid)}</td>
-          <td>{display(coachValid)}</td>
           <td>{display(p.Mode || p.mode || p.method)}</td>
           <td>{display((parseFloat(p.Cost||p.amount||0) || 0).toLocaleString())}</td>
         </tr>
@@ -1166,15 +1160,13 @@ export default function Dashboard() {
                 <th>Date</th>
                 <th>Nickname</th>
                 <th>Particulars</th>
-                <th>Gym Membership<br/>Valid Until</th>
-                <th>Coach Subscription<br/>Valid Until</th>
                 <th>Mode</th>
                 <th>Cost</th>
               </tr>
             </thead>
             <tbody>
               {(!monthlyPayments.rows || monthlyPayments.rows.length === 0) ? (
-                <tr><td colSpan={7}>-</td></tr>
+                <tr><td colSpan={5}>-</td></tr>
               ) : (
                 monthlyPayments.rows
               )}
