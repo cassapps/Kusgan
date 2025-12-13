@@ -111,8 +111,8 @@ export default function Reports() {
   const [expensesMonth, setExpensesMonth] = useState([]);
   const [totalsByMonth, setTotalsByMonth] = useState({}); // { [monthKey]: { revenue, expenses } }
 
-  const [revCollapsed, setRevCollapsed] = useState(false);
-  const [expCollapsed, setExpCollapsed] = useState(false);
+  const [revCollapsed, setRevCollapsed] = useState(true);
+  const [expCollapsed, setExpCollapsed] = useState(true);
   const [openAddRevenue, setOpenAddRevenue] = useState(false);
   const [openAddExpense, setOpenAddExpense] = useState(false);
   const [revenueForm, setRevenueForm] = useState({ Date: manilaTodayYMD(), Category: "Grocery", Particulars: "", Mode: "Cash", Cost: "" });
@@ -509,15 +509,15 @@ export default function Reports() {
           </div>
         </div>
 
-        {/* Row 2: expenses/revenue/profit */}
+        {/* Row 2: revenue/expenses/profit */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 32, maxWidth: 1100, margin: "32px auto 0" }}>
           <div className="dashboard-card">
-            <div className="dashboard-label">Monthy Expenses</div>
-            <div className="dashboard-value magenta">₱ {Number(monthlyExpenses || 0).toLocaleString()}</div>
+            <div className="dashboard-label">Revenue</div>
+            <div className="dashboard-value magenta">₱ {Number(monthlyRevenue || 0).toLocaleString()}</div>
           </div>
           <div className="dashboard-card">
-            <div className="dashboard-label">Monthly Revenue</div>
-            <div className="dashboard-value magenta">₱ {Number(monthlyRevenue || 0).toLocaleString()}</div>
+            <div className="dashboard-label">Monthly Expenses</div>
+            <div className="dashboard-value magenta">₱ {Number(monthlyExpenses || 0).toLocaleString()}</div>
           </div>
           <div className="dashboard-card">
             <div className="dashboard-label">Monthly Profit</div>
@@ -525,10 +525,10 @@ export default function Reports() {
           </div>
         </div>
 
-        {/* Monthly Revenue Table moved from Dashboard */}
+        {/* Revenue table moved from Dashboard */}
         <div style={{ marginTop: 24 }} className="panel">
           <div className="panel-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-            <span>Monthly Revenue</span>
+            <span>Revenue</span>
             <div style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}>
               <button className="button" type="button" onClick={() => setRevCollapsed(v => !v)} style={{ background: '#eee', color: '#333' }}>
                 {revCollapsed ? 'Expand' : 'Collapse'}

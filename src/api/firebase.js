@@ -909,7 +909,119 @@ export async function updatePayment(paymentId, patch) {
 export async function deletePayment(paymentId) {
   const id = String(paymentId || '').trim();
   if (!id) throw new Error('paymentId required');
+
+  // Capture the payment first so we can recompute member validity after deletion.
+  let payment = null;
+  try {
+    payment = await fb.getDocById(COLS.payments, id);
+  } catch (e) {
+    payment = null;
+  }
+
   await fb.deleteDocument(COLS.payments, id);
+
+  try {
+    const mid = String(payment?.MemberID || payment?.memberId || payment?.memberid || payment?.member || '').trim();
+    if (mid) {
+      const parseToDate = (v) => {
+        try {
+          if (!v && v !== 0) return null;
+          if (v instanceof Date) return isNaN(v) ? null : v;
+          if (typeof v === 'number') {
+            const d = new Date(v);
+            return isNaN(d) ? null : d;
+          }
+          if (v && typeof v.toDate === 'function') {
+            const d = v.toDate();
+            return d instanceof Date && !isNaN(d) ? d : null;
+          }
+          if (v && typeof v.seconds === 'number') {
+            const d = new Date(v.seconds * 1000);
+            return isNaN(d) ? null : d;
+          }
+          const d = new Date(v);
+          return isNaN(d) ? null : d;
+        } catch {
+          return null;
+        }
+      };
+
+      const gymKeys = ['membershipEnd', 'MembershipEnd', 'GymValidUntil', 'gymvaliduntil', 'gym_valid_until', 'gym_until', 'EndDate', 'enddate', 'end_date', 'valid_until', 'expiry', 'expires', 'until'];
+      const coachKeys = ['coachEnd', 'CoachEnd', 'CoachValidUntil', 'coachvaliduntil', 'coach_valid_until', 'coach_until', 'coach_end', 'coach_subscription_end', 'coach_subscription_end_date'];
+
+      const pick = (o, keys) => {
+        if (!o) return undefined;
+        for (const k of keys) {
+          if (Object.prototype.hasOwnProperty.call(o, k)) return o[k];
+          const alt = Object.keys(o).find((kk) => kk.toLowerCase().replace(/\s+/g, '') === String(k).toLowerCase().replace(/\s+/g, ''));
+          if (alt) return o[alt];
+        }
+        return undefined;
+      };
+
+      const rows1 = await fb.queryCollection(COLS.payments, { wheres: [{ field: 'MemberID', op: '==', value: mid }], limit: 4000 }).catch(() => []);
+      const rows2 = await fb.queryCollection(COLS.payments, { wheres: [{ field: 'memberId', op: '==', value: mid }], limit: 4000 }).catch(() => []);
+      const rows = mergeById(rows1 || [], rows2 || []);
+
+      let maxGym = null;
+      let maxCoach = null;
+
+      for (const r of (rows || [])) {
+        const gymRaw = pick(r, gymKeys);
+        const coachRaw = pick(r, coachKeys);
+        const gymD = parseToDate(gymRaw);
+        const coachD = parseToDate(coachRaw);
+        if (gymD && (!maxGym || gymD.getTime() > maxGym.getTime())) maxGym = gymD;
+        if (coachD && (!maxCoach || coachD.getTime() > maxCoach.getTime())) maxCoach = coachD;
+      }
+
+      const patch = {
+        updatedAt: new Date().toISOString(),
+      };
+      patch.updated_at = patch.updatedAt;
+
+      if (maxGym) {
+        const ymd = manilaYMD(maxGym);
+        patch.membershipEnd = ymd;
+        patch.membership_end = ymd;
+        patch.membershipState = 'active';
+        patch.membership_state = 'active';
+      } else {
+        patch.membershipEnd = '';
+        patch.membership_end = '';
+        patch.membershipState = 'inactive';
+        patch.membership_state = 'inactive';
+      }
+
+      if (maxCoach) {
+        const ymd = manilaYMD(maxCoach);
+        patch.coachEnd = ymd;
+        patch.coach_end = ymd;
+        patch.coachState = 'active';
+        patch.coach_state = 'active';
+      } else {
+        patch.coachEnd = '';
+        patch.coach_end = '';
+        patch.coachState = 'inactive';
+        patch.coach_state = 'inactive';
+      }
+
+      try {
+        await fb.updateDocument(COLS.members, mid, patch);
+      } catch (e) {
+        // Fallback: some datasets store MemberID as a field, not the doc id.
+        try {
+          const hit = await fb.queryCollection(COLS.members, { wheres: [{ field: 'MemberID', op: '==', value: mid }], limit: 1 });
+          if (hit && hit.length && hit[0]?.id) {
+            await fb.updateDocument(COLS.members, hit[0].id, patch);
+          }
+        } catch (e2) { /* ignore */ }
+      }
+    }
+  } catch (e) {
+    // ignore denormalization errors
+  }
+
   return { ok: true, id };
 }
 export async function addPayment(payload) {
