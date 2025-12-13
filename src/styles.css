@@ -443,6 +443,7 @@ table.aligned{ table-layout:fixed; margin-bottom:40px; }
 .pill.student { color:#1e66f5; border-color:#c7d2fe; background:#edf2ff; }
 .pill.senior  { color:#ad6800; border-color:#ffe1a8; background:#fff7e6; }
 .pill.special { color:#ad6800; border-color:#ffe1a8; background:#fff7e6; }
+.pill.white   { color:#ffffff; border-color:rgba(255,255,255,0.6); background:rgba(255,255,255,0.18); }
 
 /* Small status badge used in tables to mark open entries */
 .status-badge{

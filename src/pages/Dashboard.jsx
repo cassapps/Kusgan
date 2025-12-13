@@ -464,8 +464,8 @@ export default function Dashboard() {
         <td>{display(p.Particulars || p.particulars || p.type || p.item || p.category || p.product || p.paymentfor || p.plan || p.description)}</td>
         <td>{display(gymValid)}</td>
         <td>{display(coachValid)}</td>
-        <td>{display(p.Mode || p.mode || p.method)}</td>
-        <td>{display((parseFloat(p.Cost||p.amount||0) || 0).toLocaleString())}</td>
+        <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>{display(p.Mode || p.mode || p.method)}</td>
+        <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{display((parseFloat(p.Cost||p.amount||0) || 0).toLocaleString())}</td>
       </tr>
     );
     });
@@ -529,8 +529,8 @@ export default function Dashboard() {
             </span>
           </td>
           <td>{display(p.Particulars || p.particulars || p.type || p.item || p.category || p.product || p.paymentfor || p.plan || p.description)}</td>
-          <td>{display(p.Mode || p.mode || p.method)}</td>
-          <td>{display((parseFloat(p.Cost||p.amount||0) || 0).toLocaleString())}</td>
+          <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>{display(p.Mode || p.mode || p.method)}</td>
+          <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{display((parseFloat(p.Cost||p.amount||0) || 0).toLocaleString())}</td>
         </tr>
       );
     });
@@ -980,14 +980,14 @@ export default function Dashboard() {
           <div className="dashboard-card">
             <div className="dashboard-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
               <span>Active Gym Memberships</span>
-              <button className="button" onClick={() => openActiveList('gym')} style={{ padding: '6px 10px', fontWeight: 400, color: '#111' }}>View</button>
+              <button className="pill white" onClick={() => openActiveList('gym')} style={{ cursor: 'pointer' }}>View</button>
             </div>
             <div className="dashboard-value magenta">{stats.activeGym}</div>
           </div>
           <div className="dashboard-card">
             <div className="dashboard-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
               <span>Active Coach Subscriptions</span>
-              <button className="button" onClick={() => openActiveList('coach')} style={{ padding: '6px 10px', fontWeight: 400, color: '#111' }}>View</button>
+              <button className="pill white" onClick={() => openActiveList('coach')} style={{ cursor: 'pointer' }}>View</button>
             </div>
             <div className="dashboard-value magenta">{stats.activeCoach}</div>
           </div>
@@ -1053,6 +1053,15 @@ export default function Dashboard() {
         <div style={{marginTop:24}} className="panel">
           <div className="panel-header">Payments Today</div>
           <table className="aligned payments-table">
+            <colgroup>
+              <col style={{ width: 180 }} />
+              <col />
+              <col />
+              <col />
+              <col />
+              <col style={{ width: 90 }} />
+              <col style={{ width: 90 }} />
+            </colgroup>
             <thead>
               <tr>
                 <th>Date</th>
@@ -1060,8 +1069,8 @@ export default function Dashboard() {
                 <th>Particulars</th>
                 <th>Gym Membership<br/>Valid Until</th>
                 <th>Coach Subscription<br/>Valid Until</th>
-                <th>Mode</th>
-                <th>Cost</th>
+                <th style={{ textAlign: 'center' }}>Mode</th>
+                <th style={{ textAlign: 'right' }}>Cost</th>
               </tr>
             </thead>
             <tbody>
@@ -1155,13 +1164,20 @@ export default function Dashboard() {
             </div>
           </div>
           <table className="aligned payments-table">
+            <colgroup>
+              <col style={{ width: 180 }} />
+              <col style={{ width: 180 }} />
+              <col />
+              <col style={{ width: 90 }} />
+              <col style={{ width: 90 }} />
+            </colgroup>
             <thead>
               <tr>
                 <th>Date</th>
                 <th>Nickname</th>
                 <th>Particulars</th>
-                <th>Mode</th>
-                <th>Cost</th>
+                <th style={{ textAlign: 'center' }}>Mode</th>
+                <th style={{ textAlign: 'right' }}>Cost</th>
               </tr>
             </thead>
             <tbody>
