@@ -70,6 +70,9 @@ export default function Dashboard() {
   const [checkoutMemberId, setCheckoutMemberId] = useState(null);
   const [checkoutInitialEntry, setCheckoutInitialEntry] = useState(null);
 
+  const [openPaymentsModal, setOpenPaymentsModal] = useState(false);
+  const [paymentsModalKind, setPaymentsModalKind] = useState('all'); // 'all' | 'cash' | 'gcash'
+
   const [openActiveModal, setOpenActiveModal] = useState(false);
   const [activeModalKind, setActiveModalKind] = useState('gym'); // 'gym' | 'coach'
 
@@ -414,62 +417,68 @@ export default function Dashboard() {
 
     return { totalMembers: (membersArr || []).length, activeGym, activeCoach, visitedToday, coachToday, checkedIn, cashToday, gcashToday, totalPaymentsToday };
   };
-  // Generate payment rows
-  const paymentRows = useMemo(() => {
+  const paymentRowsForModal = useMemo(() => {
     const base = useFirestore ? (paymentsToday || []) : (payments || []);
     const today = todayYMD();
     const candidates = (p) => p.timestamp || p.created || p.paid_on || p.createdAt || p.date || p.Date || p.pay_date || null;
     const parseTs = (v) => {
       if (!v && v !== 0) return 0;
       if (typeof v === 'number') return v;
+      try { if (v && typeof v.toMillis === 'function') return v.toMillis(); } catch (e) {}
       try { if (v && typeof v.seconds === 'number') return v.seconds * 1000; } catch (e) {}
       const parsed = Date.parse(String(v));
       return isNaN(parsed) ? 0 : parsed;
     };
-    const todays = (base || []).filter(p => {
-      const d = candidates(p);
-      const ymd = d ? new Date(d).toLocaleDateString("en-CA", { year: "numeric", month: "2-digit", day: "2-digit" }) : "";
-      return ymd === today;
-    }).sort((a, b) => {
-      const ta = parseTs(candidates(a));
-      const tb = parseTs(candidates(b));
-      return (tb || 0) - (ta || 0);
-    });
+    const ymdOf = (v) => {
+      try {
+        if (!v && v !== 0) return '';
+        if (typeof v === 'string') {
+          const s = v.trim();
+          if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+        }
+        if (v && typeof v.toDate === 'function') {
+          const d = v.toDate();
+          return isNaN(d) ? '' : new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+        }
+        const d = new Date(v);
+        return isNaN(d) ? '' : new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+      } catch (e) { return ''; }
+    };
+    const filterByKind = (p) => {
+      const mode = String(p.Mode || p.mode || p.method || '').toLowerCase();
+      if (paymentsModalKind === 'cash') return mode === 'cash';
+      if (paymentsModalKind === 'gcash') return mode === 'gcash';
+      return true;
+    };
+
+    const todays = (base || [])
+      .filter(p => ymdOf(candidates(p)) === today)
+      .filter(filterByKind)
+      .sort((a, b) => (parseTs(candidates(b)) || 0) - (parseTs(candidates(a)) || 0));
 
     return todays.map((p, idx) => {
-    const member = (members || []).find(m => {
-      const pid = String(p.MemberID || p.member_id || p.id || p.member || "").trim();
-      if (!pid) return false;
-      return String(m.MemberID || m.member_id || m.id || "").trim() === pid;
+      const member = (members || []).find(m => {
+        const pid = String(p.MemberID || p.member_id || p.id || p.member || '').trim();
+        if (!pid) return false;
+        return String(m.MemberID || m.member_id || m.id || '').trim() === pid;
+      });
+      const gymValidRaw = p.gymvaliduntil || p.GymValidUntil || p.gym_valid_until || p.gym_until || p.EndDate || p.Enddate || p.enddate || p.end_date || p.end || p.valid_until || p.expiry || p.expires || p.until || '';
+      const coachValidRaw = p.coachvaliduntil || p.CoachValidUntil || p.coach_valid_until || p.coach_until || '';
+      const gymValid = fmtDate(gymValidRaw);
+      const coachValid = fmtDate(coachValidRaw);
+
+      return (
+        <tr key={idx}>
+          <td>{displayName(member)}</td>
+          <td>{display(p.Particulars || p.particulars || p.type || p.item || p.category || p.product || p.paymentfor || p.plan || p.description)}</td>
+          <td>{display(gymValid)}</td>
+          <td>{display(coachValid)}</td>
+          <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>{display(p.Mode || p.mode || p.method)}</td>
+          <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{display((parseFloat(p.Cost || p.amount || 0) || 0).toLocaleString())}</td>
+        </tr>
+      );
     });
-    const pills = member ? getMemberPills(member) : [];
-    const paidRaw = candidates(p);
-    const gymValidRaw = p.gymvaliduntil || p.GymValidUntil || p.gym_valid_until || p.gym_until || p.EndDate || p.Enddate || p.enddate || p.end_date || p.end || p.valid_until || p.expiry || p.expires || p.until || "";
-    const coachValidRaw = p.coachvaliduntil || p.CoachValidUntil || p.coach_valid_until || p.coach_until || "";
-    const gymValid = fmtDate(gymValidRaw);
-    const coachValid = fmtDate(coachValidRaw);
-    return (
-      <tr key={idx}>
-        <td>{display(fmtDateTime(paidRaw))}</td>
-        <td>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-            <span>{displayName(member)}</span>
-            {pills.length > 0 && (
-              <span style={{ display: 'inline-flex', gap: 6 }}>
-                {pills.map(p => <span key={p.key} className={`pill ${p.className}`}>{p.label}</span>)}
-              </span>
-            )}
-          </span>
-        </td>
-        <td>{display(p.Particulars || p.particulars || p.type || p.item || p.category || p.product || p.paymentfor || p.plan || p.description)}</td>
-        <td>{display(gymValid)}</td>
-        <td>{display(coachValid)}</td>
-        <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>{display(p.Mode || p.mode || p.method)}</td>
-        <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{display((parseFloat(p.Cost||p.amount||0) || 0).toLocaleString())}</td>
-      </tr>
-    );
-    });
-  }, [useFirestore, paymentsToday, payments, members]);
+  }, [useFirestore, paymentsToday, payments, members, paymentsModalKind]);
 
   const monthlyPayments = useMemo(() => {
     const base = useFirestore ? (paymentsMonth || []) : (payments || []);
@@ -996,10 +1005,76 @@ export default function Dashboard() {
           <div className="dashboard-card"><div className="dashboard-label">Coaching Sessions</div><div className="dashboard-value magenta">{stats.coachToday}</div></div>
           <div className="dashboard-card"><div className="dashboard-label">Currently Checked-In</div><div className="dashboard-value magenta">{stats.checkedIn}</div></div>
           {/* Third row */}
-          <div className="dashboard-card"><div className="dashboard-label">Cash Revenue</div><div className="dashboard-value magenta">₱ {stats.cashToday.toLocaleString()}</div></div>
-          <div className="dashboard-card"><div className="dashboard-label">GCash Revenue</div><div className="dashboard-value magenta">₱ {stats.gcashToday.toLocaleString()}</div></div>
-          <div className="dashboard-card"><div className="dashboard-label">Total Revenue</div><div className="dashboard-value magenta">₱ { (stats.totalPaymentsToday || 0).toLocaleString() }</div></div>
+          <div
+            className="dashboard-card"
+            role="button"
+            tabIndex={0}
+            onClick={() => { setPaymentsModalKind('cash'); setOpenPaymentsModal(true); }}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { setPaymentsModalKind('cash'); setOpenPaymentsModal(true); } }}
+            style={{ cursor: 'pointer' }}
+          >
+            <div className="dashboard-label">Cash Revenue</div>
+            <div className="dashboard-value magenta">₱ {stats.cashToday.toLocaleString()}</div>
+          </div>
+          <div
+            className="dashboard-card"
+            role="button"
+            tabIndex={0}
+            onClick={() => { setPaymentsModalKind('gcash'); setOpenPaymentsModal(true); }}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { setPaymentsModalKind('gcash'); setOpenPaymentsModal(true); } }}
+            style={{ cursor: 'pointer' }}
+          >
+            <div className="dashboard-label">GCash Revenue</div>
+            <div className="dashboard-value magenta">₱ {stats.gcashToday.toLocaleString()}</div>
+          </div>
+          <div
+            className="dashboard-card"
+            role="button"
+            tabIndex={0}
+            onClick={() => { setPaymentsModalKind('all'); setOpenPaymentsModal(true); }}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { setPaymentsModalKind('all'); setOpenPaymentsModal(true); } }}
+            style={{ cursor: 'pointer' }}
+          >
+            <div className="dashboard-label">Total Revenue</div>
+            <div className="dashboard-value magenta">₱ { (stats.totalPaymentsToday || 0).toLocaleString() }</div>
+          </div>
         </div>
+
+        <ModalWrapper
+          open={openPaymentsModal}
+          onClose={() => setOpenPaymentsModal(false)}
+          title={paymentsModalKind === 'cash' ? 'Cash Payments Today' : (paymentsModalKind === 'gcash' ? 'GCash Payments Today' : 'Payments Today')}
+        >
+          <div style={{ overflowX: 'auto' }}>
+            <table className="aligned payments-table" style={{ width: '100%' }}>
+              <colgroup>
+                <col style={{ width: '22%' }} />
+                <col style={{ width: '22%' }} />
+                <col style={{ width: '18%' }} />
+                <col style={{ width: '18%' }} />
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '10%' }} />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Nickname</th>
+                  <th>Particulars</th>
+                  <th>Gym Membership<br/>Valid Until</th>
+                  <th>Coach Subscription<br/>Valid Until</th>
+                  <th style={{ textAlign: 'center' }}>Mode</th>
+                  <th style={{ textAlign: 'right' }}>Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(!paymentRowsForModal || (Array.isArray(paymentRowsForModal) && paymentRowsForModal.length === 0)) ? (
+                  <tr><td colSpan={6}>-</td></tr>
+                ) : (
+                  paymentRowsForModal
+                )}
+              </tbody>
+            </table>
+          </div>
+        </ModalWrapper>
         {/* Gym Entries Table */}
         <div style={{marginTop:24}} className="panel">
           <div className="panel-header">Gym Entries Today</div>
@@ -1049,40 +1124,6 @@ export default function Dashboard() {
             setCheckoutInitialEntry(null);
           }}
         />
-        {/* Payments Today Table */}
-        <div style={{marginTop:24}} className="panel">
-          <div className="panel-header">Payments Today</div>
-          <table className="aligned payments-table">
-            <colgroup>
-              <col style={{ width: 180 }} />
-              <col />
-              <col />
-              <col />
-              <col />
-              <col style={{ width: 90 }} />
-              <col style={{ width: 90 }} />
-            </colgroup>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Nickname</th>
-                <th>Particulars</th>
-                <th>Gym Membership<br/>Valid Until</th>
-                <th>Coach Subscription<br/>Valid Until</th>
-                <th style={{ textAlign: 'center' }}>Mode</th>
-                <th style={{ textAlign: 'right' }}>Cost</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(!paymentRows || (Array.isArray(paymentRows) && paymentRows.length === 0)) ? (
-                <tr><td colSpan={7}>-</td></tr>
-              ) : (
-                paymentRows
-              )}
-            </tbody>
-          </table>
-        </div>
-
         <ModalWrapper
           open={openActiveModal}
           onClose={() => setOpenActiveModal(false)}
