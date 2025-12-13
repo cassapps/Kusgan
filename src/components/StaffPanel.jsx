@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import useLoadMore from "../lib/useLoadMore.js";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:4000";
 
@@ -8,6 +9,7 @@ export default function StaffPanel() {
   const [role, setRole] = useState("PRIMARY ATTENDANT");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const pager = useLoadMore(list, { initial: 20, step: 20, resetDeps: [list.length] });
 
   async function load() {
     setError("");
@@ -72,7 +74,7 @@ export default function StaffPanel() {
           </tr>
         </thead>
         <tbody>
-          {list.map(s => (
+          {pager.visible.map(s => (
             <tr key={s.id}>
               <td>{s.full_name}</td>
               <td><span className="badge info">{s.role}</span></td>
@@ -84,6 +86,14 @@ export default function StaffPanel() {
           )}
         </tbody>
       </table>
+
+      {pager.canLoadMore && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+          <button className="pill white" type="button" onClick={pager.loadMore} style={{ cursor: 'pointer' }}>
+            Load 20 more
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -25,6 +25,7 @@ import RefreshBadge from '../components/RefreshBadge.jsx';
 import displayName from '../lib/displayName';
 import ModalWrapper from '../components/ModalWrapper.jsx';
 import { getMemberPills } from '../lib/discount.js';
+import useLoadMore from "../lib/useLoadMore.js";
 
 function todayYMD() {
   const now = new Date();
@@ -451,6 +452,17 @@ export default function Dashboard() {
       );
     });
   }, [useFirestore, paymentsToday, payments, members, paymentsModalKind]);
+
+  const paymentsModalPager = useLoadMore(paymentRowsForModal, { initial: 20, step: 20, resetDeps: [openPaymentsModal, paymentsModalKind] });
+  const gymEntriesPager = useLoadMore(gymEntryRows, { initial: 20, step: 20, resetDeps: [gymEntryRows?.length] });
+
+  const activeList = useMemo(() => {
+    if (!openActiveModal) return [];
+    const list = activeModalKind === 'coach' ? activeMembers.coach : activeMembers.gym;
+    return Array.isArray(list) ? list : [];
+  }, [openActiveModal, activeModalKind, activeMembers]);
+
+  const activePager = useLoadMore(activeList, { initial: 20, step: 20, resetDeps: [openActiveModal, activeModalKind] });
 
 
   useEffect(() => {
@@ -966,11 +978,18 @@ export default function Dashboard() {
                 {(!paymentRowsForModal || (Array.isArray(paymentRowsForModal) && paymentRowsForModal.length === 0)) ? (
                   <tr><td colSpan={6}>-</td></tr>
                 ) : (
-                  paymentRowsForModal
+                  paymentsModalPager.visible
                 )}
               </tbody>
             </table>
           </div>
+          {paymentsModalPager.canLoadMore && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+              <button className="pill white" type="button" onClick={paymentsModalPager.loadMore} style={{ cursor: 'pointer' }}>
+                Load 20 more
+              </button>
+            </div>
+          )}
         </ModalWrapper>
         {/* Gym Entries Table */}
         <div style={{marginTop:24}} className="panel">
@@ -990,10 +1009,17 @@ export default function Dashboard() {
               {(!gymEntryRows || (Array.isArray(gymEntryRows) && gymEntryRows.length === 0)) ? (
                 <tr><td colSpan={6}>-</td></tr>
               ) : (
-                gymEntryRows
+                gymEntriesPager.visible
               )}
             </tbody>
           </table>
+          {gymEntriesPager.canLoadMore && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+              <button className="pill white" type="button" onClick={gymEntriesPager.loadMore} style={{ cursor: 'pointer' }}>
+                Load 20 more
+              </button>
+            </div>
+          )}
         </div>
         {/* Visit detail modal */}
         <VisitViewModal
@@ -1048,9 +1074,8 @@ export default function Dashboard() {
               </thead>
               <tbody>
                 {(() => {
-                  const list = activeModalKind === 'coach' ? activeMembers.coach : activeMembers.gym;
-                  if (!list || list.length === 0) return <tr><td colSpan={6}>-</td></tr>;
-                  return list.map(({ member: m, memberId, st }, idx) => {
+                  if (!activeList || activeList.length === 0) return <tr><td colSpan={6}>-</td></tr>;
+                  return activePager.visible.map(({ member: m, memberId, st }, idx) => {
                     const nick = resolveNick(m).toUpperCase();
                     const fullName = resolveFullName(m);
                     const memberSince = resolveMemberSince(m);
@@ -1082,6 +1107,13 @@ export default function Dashboard() {
               </tbody>
             </table>
           </div>
+          {activePager.canLoadMore && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+              <button className="pill white" type="button" onClick={activePager.loadMore} style={{ cursor: 'pointer' }}>
+                Load 20 more
+              </button>
+            </div>
+          )}
         </ModalWrapper>
 
         {loading && <div style={{marginTop:24}}>Loading…</div>}

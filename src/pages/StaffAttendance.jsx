@@ -5,6 +5,7 @@ import localCache from '../lib/localCache.js';
 import displayName from '../lib/displayName';
 import VisitViewModal from '../components/VisitViewModal';
 import api from '../api';
+import useLoadMore from '../lib/useLoadMore.js';
 
 const STAFF = [
   'Coach Jojo', 'Coach Elmer', 'Bezza', 'Jeanette', 'Johanna', 'Patpat', 'Sheena', 'Xyza'
@@ -246,6 +247,8 @@ export default function StaffAttendance() {
     } catch (e) { return []; }
   }, [rows]);
 
+  const attendancePager = useLoadMore(visibleRows, { initial: 20, step: 20, resetDeps: [selected] });
+
   // Filtered coaching sessions for the selected coach & period
   const coachingSessions = useMemo(() => {
     try {
@@ -270,6 +273,8 @@ export default function StaffAttendance() {
       return filtered;
     } catch (e) { return []; }
   }, [gymVisits, periods, selectedCoach, selectedPeriodIndex]);
+
+  const coachingPager = useLoadMore(coachingSessions, { initial: 20, step: 20, resetDeps: [selectedCoach, selectedPeriodIndex] });
 
   const onClock = async () => {
     if (!selected) return;
@@ -350,9 +355,9 @@ export default function StaffAttendance() {
               </tr>
             </thead>
             <tbody>
-              {visibleRows.length === 0 ? (
+              {attendancePager.visible.length === 0 ? (
                 <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--muted)' }}>No records.</td></tr>
-              ) : visibleRows.map((r, i) => {
+              ) : attendancePager.visible.map((r, i) => {
                 const ymd = rowDateYMD(r) || '';
                 const tinDisp = displayTime(r);
                 const toutIso = r?.time_out || r?.TimeOut || r?.timeOut || '';
@@ -381,6 +386,13 @@ export default function StaffAttendance() {
             </tbody>
           </table>
         </div>
+        {attendancePager.canLoadMore && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8, paddingRight: 8 }}>
+            <button className="pill white" type="button" onClick={attendancePager.loadMore} style={{ cursor: 'pointer' }}>
+              Load 20 more
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Coaching Sessions Panel */}
@@ -416,10 +428,10 @@ export default function StaffAttendance() {
             <tbody>
               {!periods || periods.length === 0 ? (
                 <tr><td colSpan={6}>No periods</td></tr>
-              ) : coachingSessions.length === 0 ? (
+              ) : coachingPager.visible.length === 0 ? (
                 <tr><td colSpan={6}>No sessions for selected coach / period.</td></tr>
               ) : (
-                coachingSessions.map((r, i) => {
+                coachingPager.visible.map((r, i) => {
                   const ymd = rowDateYMD(r) || '';
                   const tin = displayTime(r);
                   const toutIso = r?.time_out || r?.TimeOut || r?.timeOut || '';
@@ -448,6 +460,13 @@ export default function StaffAttendance() {
             </tbody>
           </table>
         </div>
+        {coachingPager.canLoadMore && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8, paddingRight: 8 }}>
+            <button className="pill white" type="button" onClick={coachingPager.loadMore} style={{ cursor: 'pointer' }}>
+              Load 20 more
+            </button>
+          </div>
+        )}
         {/* Visit detail modal for coaching session rows */}
         <VisitViewModal open={!!selectedVisit} onClose={() => setSelectedVisit(null)} row={selectedVisit} onCheckout={async (entry) => { try { await load(); } catch(e){} setSelectedVisit(null); }} />
       </div>

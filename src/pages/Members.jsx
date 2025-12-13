@@ -10,6 +10,7 @@ import React, { Suspense } from 'react';
 import { computeStatusForMember } from '../lib/membership';
 import RefreshBadge from '../components/RefreshBadge.jsx';
 import { getMemberPills } from '../lib/discount.js';
+import useLoadMore from "../lib/useLoadMore.js";
 const AddMemberModal = React.lazy(() => import('../components/AddMemberModal.jsx'));
 
 // Simple in-memory cache for SWR-style stale-while-revalidate behavior
@@ -410,6 +411,12 @@ export default function Members() {
     return withVisit;
   }, [rows, debouncedQ, visitIdx]);
 
+  const membersPager = useLoadMore(filteredSorted, {
+    initial: 20,
+    step: 20,
+    resetDeps: [debouncedQ],
+  });
+
   const openDetail = useCallback((memberId, row) => {
     if (!memberId) return;
     navigate(`/members/${encodeURIComponent(memberId)}`, { state: { row } });
@@ -451,7 +458,8 @@ export default function Members() {
             ) : filteredSorted.length <= SMALL_TABLE_THRESHOLD ? (
               // Render a normal table for small result sets so it matches other pages
               <div className="members-list-wrapper" style={{ display: 'flex', justifyContent: 'center' }}>
-                <table className="attendance-table aligned" style={{ width: '100%' }}>
+                <div style={{ width: '100%' }}>
+                  <table className="attendance-table aligned" style={{ width: '100%' }}>
                   <colgroup>
                     <col style={{ width: '15%' }} />
                     <col style={{ width: '25%' }} />
@@ -471,7 +479,7 @@ export default function Members() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredSorted.map(({ r, lastVisit, isToday, memberId }, i) => {
+                    {membersPager.visible.map(({ r, lastVisit, isToday, memberId }, i) => {
                       const pay = memberId ? payIdx.get(memberId) : undefined;
                       const first = String(firstOf(r, ["first_name","firstname","first","given_name"]) ?? "");
                       const last = String(firstOf(r, ["last_name","lastname","last","surname"]) ?? "");
@@ -507,7 +515,14 @@ export default function Members() {
                       );
                     })}
                   </tbody>
-                </table>
+                  </table>
+
+                  {membersPager.canLoadMore && (
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 10 }}>
+                      <button className="button" onClick={membersPager.loadMore}>Load 20 more</button>
+                    </div>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="members-list-wrapper" style={{ width: '100%', display: 'flex', flexDirection: 'column', flex: 1 }}>
@@ -520,13 +535,13 @@ export default function Members() {
                   <div style={{ width: '15%', textAlign: 'center' }}>Coach Valid Until</div>
                 </div>
                 <List
-                  height={Math.min(listHeight, Math.max(200, filteredSorted.length * 56))}
-                  itemCount={filteredSorted.length}
+                  height={Math.min(listHeight, Math.max(200, membersPager.visible.length * 56))}
+                  itemCount={membersPager.visible.length}
                   itemSize={56}
                   width={'100%'}
                 >
                 {({ index, style }) => {
-                  const { r, lastVisit, isToday, memberId } = filteredSorted[index];
+                  const { r, lastVisit, isToday, memberId } = membersPager.visible[index];
                   const pay = memberId ? payIdx.get(memberId) : undefined;
                   const first = String(firstOf(r, ["first_name","firstname","first","given_name"]) ?? "");
                   const last = String(firstOf(r, ["last_name","lastname","last","surname"]) ?? "");
@@ -563,10 +578,15 @@ export default function Members() {
                   );
                 }}
               </List>
+
+              {membersPager.canLoadMore && (
+                <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 10 }}>
+                  <button className="button" onClick={membersPager.loadMore}>Load 20 more</button>
+                </div>
+              )}
               </div>
             )}
           </div>
-          {/* no client-side "Load more" — results come from the server (recent members or search) */}
         </div>
       )}
 

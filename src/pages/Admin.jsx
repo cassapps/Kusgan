@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import apiClient from '../lib/apiClient';
 import api from '../api';
+import useLoadMore from '../lib/useLoadMore.js';
 const { fetchPricing } = api;
 
 export default function AdminPage() {
@@ -126,6 +127,29 @@ export default function AdminPage() {
     });
     return { gymOnly, coachOnly, bundle, merch };
   })();
+
+  const pricingItems = useMemo(() => (
+    [
+      ...(grouped.gymOnly || []).map((r) => ({ group: 'gymOnly', r })),
+      ...(grouped.coachOnly || []).map((r) => ({ group: 'coachOnly', r })),
+      ...(grouped.bundle || []).map((r) => ({ group: 'bundle', r })),
+      ...(grouped.merch || []).map((r) => ({ group: 'merch', r })),
+    ]
+  ), [grouped.gymOnly, grouped.coachOnly, grouped.bundle, grouped.merch]);
+
+  const pricingPager = useLoadMore(pricingItems, {
+    initial: 20,
+    step: 20,
+    resetDeps: [pricingRows.length, products.length],
+  });
+
+  const visiblePricingByGroup = useMemo(() => {
+    const out = { gymOnly: [], coachOnly: [], bundle: [], merch: [] };
+    pricingPager.visible.forEach(({ group, r }) => {
+      if (out[group]) out[group].push(r);
+    });
+    return out;
+  }, [pricingPager.visible]);
 
   // load users list
   useEffect(() => {
@@ -433,14 +457,14 @@ export default function AdminPage() {
                 </tr>
               </thead>
               <tbody>
-                {(grouped.gymOnly.length + grouped.coachOnly.length + grouped.bundle.length + grouped.merch.length) === 0 ? (
+                {pricingItems.length === 0 ? (
                   <tr><td colSpan={6} style={{ color: '#888', padding: 12 }}>No pricing rules configured.</td></tr>
                 ) : (
                   <>
-                    {grouped.gymOnly.length > 0 && (
+                    {visiblePricingByGroup.gymOnly.length > 0 && (
                       <>
                         <tr style={{ background: 'var(--muted-background)', fontWeight: 700 }}><td colSpan={6} style={{ padding: 8 }}>Gym Membership Only</td></tr>
-                        {grouped.gymOnly.map(r => {
+                        {visiblePricingByGroup.gymOnly.map(r => {
                           const editing = editingId === (r.id || r.particulars);
                           return (
                             <tr key={(r.id || r.particulars)} style={{ borderTop: '1px solid var(--light-border)' }}>
@@ -467,10 +491,10 @@ export default function AdminPage() {
                       </>
                     )}
 
-                    {grouped.coachOnly.length > 0 && (
+                    {visiblePricingByGroup.coachOnly.length > 0 && (
                       <>
                         <tr style={{ background: 'var(--muted-background)', fontWeight: 700 }}><td colSpan={6} style={{ padding: 8 }}>Coach Subscription Only</td></tr>
-                        {grouped.coachOnly.map(r => {
+                        {visiblePricingByGroup.coachOnly.map(r => {
                           const editing = editingId === (r.id || r.particulars);
                           return (
                             <tr key={(r.id || r.particulars)} style={{ borderTop: '1px solid var(--light-border)' }}>
@@ -497,10 +521,10 @@ export default function AdminPage() {
                       </>
                     )}
 
-                    {grouped.bundle.length > 0 && (
+                    {visiblePricingByGroup.bundle.length > 0 && (
                       <>
                         <tr style={{ background: 'var(--muted-background)', fontWeight: 700 }}><td colSpan={6} style={{ padding: 8 }}>Gym &amp; Coach Bundle</td></tr>
-                        {grouped.bundle.map(r => {
+                        {visiblePricingByGroup.bundle.map(r => {
                           const editing = editingId === (r.id || r.particulars);
                           return (
                             <tr key={(r.id || r.particulars)} style={{ borderTop: '1px solid var(--light-border)' }}>
@@ -527,10 +551,10 @@ export default function AdminPage() {
                       </>
                     )}
 
-                    {grouped.merch.length > 0 && (
+                    {visiblePricingByGroup.merch.length > 0 && (
                       <>
                         <tr style={{ background: 'var(--muted-background)', fontWeight: 700 }}><td colSpan={6} style={{ padding: 8 }}>Merchandise</td></tr>
-                        {grouped.merch.map(r => {
+                        {visiblePricingByGroup.merch.map(r => {
                           const editing = editingId === (r.id || r.particulars);
                           return (
                             <tr key={(r.id || r.particulars)} style={{ borderTop: '1px solid var(--light-border)' }}>
@@ -560,6 +584,12 @@ export default function AdminPage() {
                 )}
               </tbody>
             </table>
+
+            {pricingPager.canLoadMore && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 10 }}>
+                <button className="button" onClick={pricingPager.loadMore}>Load 20 more</button>
+              </div>
+            )}
             
           </div>
         </div>

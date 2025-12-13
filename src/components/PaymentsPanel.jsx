@@ -3,6 +3,7 @@ import "../styles.css";
 import api from "../api";
 import apiClient from '../lib/apiClient';
 import { fmtDateTime } from "../pages/MemberDetail.jsx";
+import useLoadMore from "../lib/useLoadMore.js";
 const { fetchPayments, addPayment, fetchMembers } = api;
 
 const MANILA_TZ = "Asia/Manila";
@@ -75,6 +76,7 @@ const endDateFrom = (startYMD, validityDays) => {
 
 export default function PaymentsPanel() {
   const [rows, setRows] = useState([]);
+    const pager = useLoadMore(rows, { initial: 20, step: 20, resetDeps: [rows.length] });
   const [pricing, setPricing] = useState([]); // [{Particulars, Gym Membership, Coach Subscription, Cost, Validity}]
   const [members, setMembers] = useState([]); // normalized below
   const [busy, setBusy] = useState(false);
@@ -417,7 +419,7 @@ export default function PaymentsPanel() {
                 </td>
               </tr>
             ) : (
-              rows.map((r, i) => (
+              pager.visible.map((r, i) => (
                 <tr key={i}>
                   <td>{fmtDateTime(`${r.Date}T${r.Time || "00:00"}:00+08:00`)}</td>
                   <td>{fmtManilaTime(`${r.Date}T${r.Time || "00:00"}:00+08:00`)}</td>
@@ -432,6 +434,14 @@ export default function PaymentsPanel() {
             )}
           </tbody>
         </table>
+
+        {pager.canLoadMore && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+            <button className="pill white" type="button" onClick={pager.loadMore} style={{ cursor: 'pointer' }}>
+              Load 20 more
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -5,6 +5,7 @@ import displayName from "../lib/displayName";
 import { fmtDate, fmtDateTime, display } from "./MemberDetail.jsx";
 import ModalWrapper from "../components/ModalWrapper.jsx";
 import { getMemberPills } from "../lib/discount.js";
+import useLoadMore from "../lib/useLoadMore.js";
 
 const {
   fetchMembers,
@@ -396,6 +397,8 @@ export default function Reports() {
     });
   }, [paymentsMonth, revenuesMonth, members]);
 
+  const revenuePager = useLoadMore(monthlyRows, { initial: 20, step: 20, resetDeps: [selectedMonthKey] });
+
   const expenseRows = useMemo(() => {
     const candidates = (e) => e.timestamp || e.created || e.createdAt || e.date || e.Date || null;
     const parseTs = (v) => {
@@ -419,6 +422,8 @@ export default function Reports() {
       );
     });
   }, [expensesMonth]);
+
+  const expensesPager = useLoadMore(expenseRows, { initial: 20, step: 20, resetDeps: [selectedMonthKey] });
 
   const resetRevenueForm = () => {
     setRevenueForm({ Date: manilaTodayYMD(), Category: "Grocery", Particulars: "", Mode: "Cash", Cost: "" });
@@ -558,15 +563,23 @@ export default function Reports() {
                 </tr>
               </thead>
               <tbody>
-                {(!monthlyRows || (Array.isArray(monthlyRows) && monthlyRows.length === 0)) ? (
+                {(!revenuePager.visible || (Array.isArray(revenuePager.visible) && revenuePager.visible.length === 0)) ? (
                   <tr>
                     <td colSpan={5}>-</td>
                   </tr>
                 ) : (
-                  monthlyRows
+                  revenuePager.visible
                 )}
               </tbody>
             </table>
+          )}
+
+          {!revCollapsed && revenuePager.canLoadMore && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+              <button className="pill white" type="button" onClick={revenuePager.loadMore} style={{ cursor: 'pointer' }}>
+                Load 20 more
+              </button>
+            </div>
           )}
         </div>
 
@@ -601,13 +614,21 @@ export default function Reports() {
                 </tr>
               </thead>
               <tbody>
-                {(!expenseRows || (Array.isArray(expenseRows) && expenseRows.length === 0)) ? (
+                {(!expensesPager.visible || (Array.isArray(expensesPager.visible) && expensesPager.visible.length === 0)) ? (
                   <tr><td colSpan={4}>-</td></tr>
                 ) : (
-                  expenseRows
+                  expensesPager.visible
                 )}
               </tbody>
             </table>
+          )}
+
+          {!expCollapsed && expensesPager.canLoadMore && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+              <button className="pill white" type="button" onClick={expensesPager.loadMore} style={{ cursor: 'pointer' }}>
+                Load 20 more
+              </button>
+            </div>
           )}
         </div>
 

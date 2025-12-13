@@ -192,9 +192,9 @@ export default function MemberDetail() {
   const [checkModalMode, setCheckModalMode] = useState(null); // 'in' | 'out' | null
   const [viewProgressIndex, setViewProgressIndex] = useState(-1);
   const [imgFailed, setImgFailed] = useState(false);
-  const [visitsLimit, setVisitsLimit] = useState(10);
-  const [progressLimit, setProgressLimit] = useState(10);
-  const [paymentsLimit, setPaymentsLimit] = useState(10);
+  const [visitsLimit, setVisitsLimit] = useState(20);
+  const [progressLimit, setProgressLimit] = useState(20);
+  const [paymentsLimit, setPaymentsLimit] = useState(20);
 
   // Reset image-failed flag whenever the computed photo URL changes
   useEffect(() => { setImgFailed(false); }, [photoUrl]);
@@ -714,9 +714,9 @@ export default function MemberDetail() {
         </tbody>
         </table>
         {visits.length > visitsLimit && (
-          <div style={{ textAlign: "center", marginTop: 8 }}>
-            <button className="button" onClick={() => setVisitsLimit((n) => (n < visits.length ? Math.min(n + 10, visits.length) : 10))}>
-              {visitsLimit < visits.length ? `Load ${Math.min(10, visits.length - visitsLimit)} more` : 'Show less'}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+            <button className="pill white" type="button" onClick={() => setVisitsLimit((n) => Math.min(n + 20, visits.length))} style={{ cursor: 'pointer' }}>
+              Load 20 more
             </button>
           </div>
         )}
@@ -820,9 +820,9 @@ export default function MemberDetail() {
         </tbody>
         </table>
         {progress.length > progressLimit && (
-          <div style={{ textAlign: "center", marginTop: 8 }}>
-            <button className="button" onClick={() => setProgressLimit((n) => (n < progress.length ? Math.min(n + 10, progress.length) : 10))}>
-              {progressLimit < progress.length ? `Load ${Math.min(10, progress.length - progressLimit)} more` : 'Show less'}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+            <button className="pill white" type="button" onClick={() => setProgressLimit((n) => Math.min(n + 20, progress.length))} style={{ cursor: 'pointer' }}>
+              Load 20 more
             </button>
           </div>
         )}
@@ -881,9 +881,9 @@ export default function MemberDetail() {
         </tbody>
         </table>
         {payments.length > paymentsLimit && (
-          <div style={{ textAlign: "center", marginTop: 8 }}>
-            <button className="button" onClick={() => setPaymentsLimit((n) => (n < payments.length ? Math.min(n + 10, payments.length) : 10))}>
-              {paymentsLimit < payments.length ? `Load ${Math.min(10, payments.length - paymentsLimit)} more` : 'Show less'}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+            <button className="pill white" type="button" onClick={() => setPaymentsLimit((n) => Math.min(n + 20, payments.length))} style={{ cursor: 'pointer' }}>
+              Load 20 more
             </button>
           </div>
         )}
