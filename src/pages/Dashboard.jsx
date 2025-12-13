@@ -27,7 +27,12 @@ import ModalWrapper from '../components/ModalWrapper.jsx';
 
 function todayYMD() {
   const now = new Date();
-  return now.toLocaleDateString("en-CA", { year: "numeric", month: "2-digit", day: "2-digit" });
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
 }
 
 // Keep local name firstOf for earlier usage but delegate to shared visit util
@@ -99,22 +104,60 @@ export default function Dashboard() {
   const parseMaybeDate = (v) => {
     try {
       if (!v && v !== 0) return null;
-      if (v instanceof Date) return v;
-      if (typeof v === 'number') return new Date(v);
-      if (v && typeof v.seconds === 'number') return new Date(v.seconds * 1000);
+      if (v instanceof Date) return isNaN(v) ? null : v;
+      if (typeof v === 'number') {
+        const d = new Date(v);
+        return isNaN(d) ? null : d;
+      }
+      // Firestore Timestamp (client/admin) commonly has toDate()/toMillis() or seconds/_seconds
+      if (v && typeof v.toDate === 'function') {
+        const d = v.toDate();
+        return (d instanceof Date && !isNaN(d)) ? d : null;
+      }
+      if (v && typeof v.toMillis === 'function') {
+        const d = new Date(v.toMillis());
+        return isNaN(d) ? null : d;
+      }
+      if (v && typeof v.seconds === 'number') {
+        const d = new Date(v.seconds * 1000);
+        return isNaN(d) ? null : d;
+      }
+      if (v && typeof v._seconds === 'number') {
+        const d = new Date(v._seconds * 1000);
+        return isNaN(d) ? null : d;
+      }
       const d = new Date(v);
       return isNaN(d) ? null : d;
-    } catch (e) { return null; }
+    } catch (e) {
+      return null;
+    }
+  };
+
+  const manilaYMD = (v) => {
+    try {
+      if (!v && v !== 0) return null;
+      if (typeof v === 'string') {
+        const s = v.trim();
+        // If it's already a YYYY-MM-DD (or starts with it), treat it as date-only.
+        if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+      }
+      const d = parseMaybeDate(v);
+      if (!d) return null;
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Manila',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(d);
+    } catch (e) {
+      return null;
+    }
   };
 
   const isDateActive = (v) => {
-    const d = parseMaybeDate(v);
-    if (!d) return false;
-    const today = new Date();
-    today.setHours(0,0,0,0);
-    const dt = new Date(d);
-    dt.setHours(0,0,0,0);
-    return dt >= today;
+    const endYMD = manilaYMD(v);
+    if (!endYMD) return false;
+    return endYMD >= todayYMD();
   };
 
   const resolveMemberId = (m) => String(m?.MemberID || m?.member_id || m?.memberid || m?.memberId || m?.id || '').trim();
