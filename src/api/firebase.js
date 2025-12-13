@@ -14,6 +14,71 @@ const COLS = {
   pricing: 'pricing',
 };
 
+function ymdNext(ymd) {
+  try {
+    const [yy, mm, dd] = String(ymd || '').split('-').map((n) => Number(n));
+    if (!yy || !mm || !dd) return '';
+    const d = new Date(yy, (mm - 1), dd);
+    d.setDate(d.getDate() + 1);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  } catch (e) {
+    return '';
+  }
+}
+
+function ymdMonthNext(monthKey) {
+  try {
+    const [yy, mm] = String(monthKey || '').split('-').map((n) => Number(n));
+    if (!yy || !mm) return '';
+    const d = new Date(yy, (mm - 1), 1);
+    d.setMonth(d.getMonth() + 1);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    return `${y}-${m}`;
+  } catch (e) {
+    return '';
+  }
+}
+
+function ymdToLocalDayRange(ymd) {
+  try {
+    const [yy, mm, dd] = String(ymd || '').split('-').map((n) => Number(n));
+    if (!yy || !mm || !dd) return { start: null, end: null };
+    const start = new Date(yy, (mm - 1), dd, 0, 0, 0, 0);
+    const end = new Date(yy, (mm - 1), dd + 1, 0, 0, 0, 0);
+    return { start, end };
+  } catch (e) {
+    return { start: null, end: null };
+  }
+}
+
+function monthKeyToLocalRange(monthKey) {
+  try {
+    const [yy, mm] = String(monthKey || '').split('-').map((n) => Number(n));
+    if (!yy || !mm) return { start: null, end: null };
+    const start = new Date(yy, (mm - 1), 1, 0, 0, 0, 0);
+    const end = new Date(yy, (mm - 1) + 1, 1, 0, 0, 0, 0);
+    return { start, end };
+  } catch (e) {
+    return { start: null, end: null };
+  }
+}
+
+function mergeById(...lists) {
+  const map = new Map();
+  for (const list of lists) {
+    for (const r of (list || [])) {
+      const id = r && (r.id || r._id);
+      if (!id) continue;
+      map.set(id, r);
+    }
+  }
+  return Array.from(map.values());
+}
+
 // Map common sheet names (legacy) to collections
 function sheetToCol(sheetName) {
   if (!sheetName) return null;
@@ -178,12 +243,18 @@ export async function fetchGymEntriesSince({ days = 30, limit = 2000 } = {}) {
   const cutoff = new Date(Date.now() - (days * 24 * 60 * 60 * 1000));
   const cutoffYMD = cutoff.toISOString().slice(0, 10);
   try {
+    // String Date range works for both YYYY-MM-DD and ISO strings that start with YYYY-MM-DD.
     const rows = await fb.queryCollection(COLS.gymEntries, {
       wheres: [{ field: 'Date', op: '>=', value: cutoffYMD }],
-      orderBy: { field: 'Date', dir: 'desc' },
       limit,
     });
-    return { rows };
+    if (rows && rows.length) return { rows };
+    // Fallback: if Date is stored as a Firestore Timestamp.
+    const rowsTs = await fb.queryCollection(COLS.gymEntries, {
+      wheres: [{ field: 'Date', op: '>=', value: cutoff }],
+      limit,
+    });
+    return { rows: rowsTs || [] };
   } catch (e) {
     return { rows: [] };
   }
@@ -192,12 +263,32 @@ export async function fetchGymEntriesSince({ days = 30, limit = 2000 } = {}) {
 export async function fetchGymEntriesForDate(dateYMD) {
   const ymd = String(dateYMD || '').trim();
   if (!ymd) return { rows: [] };
+  const next = ymdNext(ymd);
+  const { start, end } = ymdToLocalDayRange(ymd);
   try {
-    const rows = await fb.queryCollection(COLS.gymEntries, {
-      wheres: [{ field: 'Date', op: '==', value: ymd }],
-      limit: 2000,
-    });
-    return { rows };
+    // Range query covers YYYY-MM-DD and ISO strings.
+    if (next) {
+      const rows = await fb.queryCollection(COLS.gymEntries, {
+        wheres: [
+          { field: 'Date', op: '>=', value: ymd },
+          { field: 'Date', op: '<', value: next },
+        ],
+        limit: 2000,
+      });
+      if (rows && rows.length) return { rows };
+    }
+    // Fallback: Timestamp range.
+    if (start && end) {
+      const rowsTs = await fb.queryCollection(COLS.gymEntries, {
+        wheres: [
+          { field: 'Date', op: '>=', value: start },
+          { field: 'Date', op: '<', value: end },
+        ],
+        limit: 2000,
+      });
+      return { rows: rowsTs || [] };
+    }
+    return { rows: [] };
   } catch (e) {
     return { rows: [] };
   }
@@ -453,9 +544,40 @@ export async function fetchMembersRecent({ limit = 200, days = 90 } = {}) {
   let paymentsRaw = [];
   let entriesRaw = [];
   try {
+    const querySince = async (col) => {
+      // Prefer string Date (YYYY-MM-DD or ISO), fallback to Timestamp Date.
+      const fromDate = new Date(cutoffMs);
+      try {
+        const rows = await fb.queryCollection(col, {
+          wheres: [{ field: 'Date', op: '>=', value: cutoffYMD }],
+          limit: 4000,
+        });
+        if (rows && rows.length) return rows;
+      } catch (e) { /* ignore */ }
+      try {
+        const rowsTs = await fb.queryCollection(col, {
+          wheres: [{ field: 'Date', op: '>=', value: fromDate }],
+          limit: 4000,
+        });
+        if (rowsTs && rowsTs.length) return rowsTs;
+      } catch (e) { /* ignore */ }
+      // Final fallback: common created/timestamp fields if present.
+      const fallbacks = ['createdAt', 'created_at', 'timestamp', 'Timestamp', 'TimeIn', 'timeIn'];
+      for (const f of fallbacks) {
+        try {
+          const rows = await fb.queryCollection(col, {
+            wheres: [{ field: f, op: '>=', value: fromDate }],
+            limit: 4000,
+          });
+          if (rows && rows.length) return rows;
+        } catch (e) { /* ignore */ }
+      }
+      return [];
+    };
+
     [paymentsRaw, entriesRaw] = await Promise.all([
-      fb.queryCollection(COLS.payments, { wheres: [{ field: 'Date', op: '>=', value: cutoffYMD }], orderBy: { field: 'Date', dir: 'desc' }, limit: 4000 }).catch(() => []),
-      fb.queryCollection(COLS.gymEntries, { wheres: [{ field: 'Date', op: '>=', value: cutoffYMD }], orderBy: { field: 'Date', dir: 'desc' }, limit: 4000 }).catch(() => []),
+      querySince(COLS.payments),
+      querySince(COLS.gymEntries),
     ]);
   } catch (e) {
     paymentsRaw = entriesRaw = [];
@@ -574,7 +696,7 @@ export async function fetchMembersRecent({ limit = 200, days = 90 } = {}) {
     }
   }
 
-  return { rows: out.slice(0, max) };
+  return { rows: out.slice(0, max), payments: paymentsRaw || [], gymEntries: entriesRaw || [] };
 }
 
 // Simple search across member name fields. Firestore lacks rich text search in the client SDK,
@@ -663,10 +785,14 @@ export async function fetchPaymentsSince({ days = 30, limit = 2000 } = {}) {
   try {
     const rows = await fb.queryCollection(COLS.payments, {
       wheres: [{ field: 'Date', op: '>=', value: cutoffYMD }],
-      orderBy: { field: 'Date', dir: 'desc' },
       limit,
     });
-    return { rows };
+    if (rows && rows.length) return { rows };
+    const rowsTs = await fb.queryCollection(COLS.payments, {
+      wheres: [{ field: 'Date', op: '>=', value: cutoff }],
+      limit,
+    });
+    return { rows: rowsTs || [] };
   } catch (e) {
     return { rows: [] };
   }
@@ -675,12 +801,30 @@ export async function fetchPaymentsSince({ days = 30, limit = 2000 } = {}) {
 export async function fetchPaymentsForDate(dateYMD) {
   const ymd = String(dateYMD || '').trim();
   if (!ymd) return { rows: [] };
+  const next = ymdNext(ymd);
+  const { start, end } = ymdToLocalDayRange(ymd);
   try {
-    const rows = await fb.queryCollection(COLS.payments, {
-      wheres: [{ field: 'Date', op: '==', value: ymd }],
-      limit: 2000,
-    });
-    return { rows };
+    if (next) {
+      const rows = await fb.queryCollection(COLS.payments, {
+        wheres: [
+          { field: 'Date', op: '>=', value: ymd },
+          { field: 'Date', op: '<', value: next },
+        ],
+        limit: 2000,
+      });
+      if (rows && rows.length) return { rows };
+    }
+    if (start && end) {
+      const rowsTs = await fb.queryCollection(COLS.payments, {
+        wheres: [
+          { field: 'Date', op: '>=', value: start },
+          { field: 'Date', op: '<', value: end },
+        ],
+        limit: 2000,
+      });
+      return { rows: rowsTs || [] };
+    }
+    return { rows: [] };
   } catch (e) {
     return { rows: [] };
   }
@@ -690,17 +834,29 @@ export async function fetchPaymentsForMonth(monthKey, { limit = 8000 } = {}) {
   const mk = String(monthKey || '').trim();
   if (!mk || !/^\d{4}-\d{2}$/.test(mk)) return { rows: [] };
   const start = `${mk}-01`;
-  const end = `${mk}-31`;
+  const nextMonth = ymdMonthNext(mk);
+  const endExclusive = nextMonth ? `${nextMonth}-01` : `${mk}-32`;
+  const { start: startTs, end: endTs } = monthKeyToLocalRange(mk);
   try {
     const rows = await fb.queryCollection(COLS.payments, {
       wheres: [
         { field: 'Date', op: '>=', value: start },
-        { field: 'Date', op: '<=', value: end },
+        { field: 'Date', op: '<', value: endExclusive },
       ],
-      orderBy: { field: 'Date', dir: 'desc' },
       limit,
     });
-    return { rows };
+    if (rows && rows.length) return { rows };
+    if (startTs && endTs) {
+      const rowsTs = await fb.queryCollection(COLS.payments, {
+        wheres: [
+          { field: 'Date', op: '>=', value: startTs },
+          { field: 'Date', op: '<', value: endTs },
+        ],
+        limit,
+      });
+      return { rows: rowsTs || [] };
+    }
+    return { rows: [] };
   } catch (e) {
     return { rows: [] };
   }
@@ -714,33 +870,140 @@ export function listenMembers(onRows, onError) {
 export function listenGymEntriesForDate(dateYMD, onRows, onError) {
   const ymd = String(dateYMD || '').trim();
   if (!ymd) return () => {};
-  return fb.listenQueryCollection(COLS.gymEntries, { wheres: [{ field: 'Date', op: '==', value: ymd }], limit: 2000 }, onRows, onError);
+  const next = ymdNext(ymd);
+  const { start, end } = ymdToLocalDayRange(ymd);
+  let rowsA = [];
+  let rowsB = [];
+  const emit = () => {
+    try { onRows && onRows(mergeById(rowsA, rowsB)); } catch (e) { /* ignore */ }
+  };
+  const unsubs = [];
+
+  // String range listener: covers YYYY-MM-DD and ISO strings.
+  if (next) {
+    try {
+      unsubs.push(
+        fb.listenQueryCollection(
+          COLS.gymEntries,
+          { wheres: [{ field: 'Date', op: '>=', value: ymd }, { field: 'Date', op: '<', value: next }], limit: 2000 },
+          (r) => { rowsA = r || []; emit(); },
+          onError
+        )
+      );
+    } catch (e) { /* ignore */ }
+  }
+
+  // Timestamp range listener.
+  if (start && end) {
+    try {
+      unsubs.push(
+        fb.listenQueryCollection(
+          COLS.gymEntries,
+          { wheres: [{ field: 'Date', op: '>=', value: start }, { field: 'Date', op: '<', value: end }], limit: 2000 },
+          (r) => { rowsB = r || []; emit(); },
+          onError
+        )
+      );
+    } catch (e) { /* ignore */ }
+  }
+
+  return () => { for (const u of unsubs) { try { u && u(); } catch (e) {} } };
 }
 
 export function listenPaymentsForDate(dateYMD, onRows, onError) {
   const ymd = String(dateYMD || '').trim();
   if (!ymd) return () => {};
-  return fb.listenQueryCollection(COLS.payments, { wheres: [{ field: 'Date', op: '==', value: ymd }], limit: 2000 }, onRows, onError);
+  const next = ymdNext(ymd);
+  const { start, end } = ymdToLocalDayRange(ymd);
+  let rowsA = [];
+  let rowsB = [];
+  const emit = () => {
+    try { onRows && onRows(mergeById(rowsA, rowsB)); } catch (e) { /* ignore */ }
+  };
+  const unsubs = [];
+
+  if (next) {
+    try {
+      unsubs.push(
+        fb.listenQueryCollection(
+          COLS.payments,
+          { wheres: [{ field: 'Date', op: '>=', value: ymd }, { field: 'Date', op: '<', value: next }], limit: 2000 },
+          (r) => { rowsA = r || []; emit(); },
+          onError
+        )
+      );
+    } catch (e) { /* ignore */ }
+  }
+
+  if (start && end) {
+    try {
+      unsubs.push(
+        fb.listenQueryCollection(
+          COLS.payments,
+          { wheres: [{ field: 'Date', op: '>=', value: start }, { field: 'Date', op: '<', value: end }], limit: 2000 },
+          (r) => { rowsB = r || []; emit(); },
+          onError
+        )
+      );
+    } catch (e) { /* ignore */ }
+  }
+
+  return () => { for (const u of unsubs) { try { u && u(); } catch (e) {} } };
 }
 
 export function listenPaymentsForMonth(monthKey, onRows, onError) {
   const mk = String(monthKey || '').trim();
   if (!mk || !/^\d{4}-\d{2}$/.test(mk)) return () => {};
   const start = `${mk}-01`;
-  const end = `${mk}-31`;
-  return fb.listenQueryCollection(
-    COLS.payments,
-    {
-      wheres: [
-        { field: 'Date', op: '>=', value: start },
-        { field: 'Date', op: '<=', value: end },
-      ],
-      orderBy: { field: 'Date', dir: 'desc' },
-      limit: 8000,
-    },
-    onRows,
-    onError
-  );
+  const nextMonth = ymdMonthNext(mk);
+  const endExclusive = nextMonth ? `${nextMonth}-01` : `${mk}-32`;
+  const { start: startTs, end: endTs } = monthKeyToLocalRange(mk);
+  let rowsA = [];
+  let rowsB = [];
+  const emit = () => {
+    try { onRows && onRows(mergeById(rowsA, rowsB)); } catch (e) { /* ignore */ }
+  };
+  const unsubs = [];
+
+  // String range listener (YYYY-MM-DD or ISO strings).
+  try {
+    unsubs.push(
+      fb.listenQueryCollection(
+        COLS.payments,
+        {
+          wheres: [
+            { field: 'Date', op: '>=', value: start },
+            { field: 'Date', op: '<', value: endExclusive },
+          ],
+          limit: 8000,
+        },
+        (r) => { rowsA = r || []; emit(); },
+        onError
+      )
+    );
+  } catch (e) { /* ignore */ }
+
+  // Timestamp range listener.
+  if (startTs && endTs) {
+    try {
+      unsubs.push(
+        fb.listenQueryCollection(
+          COLS.payments,
+          {
+            wheres: [
+              { field: 'Date', op: '>=', value: startTs },
+              { field: 'Date', op: '<', value: endTs },
+            ],
+            limit: 8000,
+          },
+          (r) => { rowsB = r || []; emit(); },
+          onError
+        )
+      );
+    } catch (e) { /* ignore */ }
+  }
+
+  return () => { for (const u of unsubs) { try { u && u(); } catch (e) {} } };
 }
 
 // Upload photo helpers (client). Uses Firebase Storage via fb.uploadFile

@@ -251,7 +251,7 @@ export default function Members() {
     ]);
     return {
       members: (mRes?.rows ?? mRes?.data ?? []).map(normRow),
-      payments: [],
+      payments: (mRes?.payments ?? []),
       gymEntries: (gRes?.rows ?? gRes?.data ?? [])
     };
   };
@@ -271,7 +271,12 @@ export default function Members() {
     if (!data) return;
     try {
       setRows(data.members || []);
-      setPayIdx(useFirestore ? buildMemberStatusIndex(data.members || []) : buildPaymentIndex(data.payments || []));
+      if (useFirestore) {
+        const pays = data.payments || [];
+        setPayIdx((pays && pays.length) ? buildPaymentIndex(pays) : buildMemberStatusIndex(data.members || []));
+      } else {
+        setPayIdx(buildPaymentIndex(data.payments || []));
+      }
       setVisitIdx(buildLastVisitIndex(data.gymEntries || []));
       MEMBERS_CACHE.members = data.members || [];
       MEMBERS_CACHE.payments = data.payments || [];
