@@ -245,7 +245,15 @@ export default function PaymentModal({ open, onClose, memberId, onSaved, members
 
   // Filter pricing based on eligibility rules (visibility rules from pricing sheet)
   const filteredPricing = useMemo(() => {
-    const ctx = { hasActiveGym, hasActiveCoach, isStudent: !!isStudent, isSenior: !!isSenior, isSpecial: !!isSpecial, isOffPeak };
+    const ctx = {
+      hasActiveGym,
+      hasActiveCoach,
+      isStudent: !!isStudent,
+      isSenior: !!isSenior,
+      isSpecial: !!isSpecial,
+      isOffPeak,
+      showAllParticulars: true,
+    };
     return (pricing || []).filter((p) => {
       const name = String(p?.Particulars || "").trim();
       if (!name) return false;

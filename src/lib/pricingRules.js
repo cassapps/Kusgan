@@ -64,6 +64,11 @@ export function effectiveValidityDays(particulars, rawValidityDays) {
 
 export function isParticularsVisible(particulars, ctx) {
   if (!isAllowedParticulars(particulars)) return false;
+
+  // Temporary override: show all allowed Particulars regardless of eligibility.
+  // (Still hides unknown/legacy items via the allowlist above.)
+  if (ctx?.showAllParticulars) return true;
+
   const name = normName(particulars);
   const isOffPeak = !!ctx?.isOffPeak;
   const hasActiveGym = !!ctx?.hasActiveGym;

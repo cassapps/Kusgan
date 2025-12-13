@@ -40,4 +40,13 @@ describe('pricingRules', () => {
     expect(isParticularsVisible('Daily Coach Offpeak', { ...ctx, hasActiveGym: true })).toBe(false);
     expect(isParticularsVisible('Some Random Product', ctx)).toBe(false);
   });
+
+  it('showAllParticulars shows all allowed items', () => {
+    const ctx = { hasActiveGym: true, hasActiveCoach: true, isStudent: false, isSenior: false, isSpecial: false, isOffPeak: false, showAllParticulars: true };
+    // Allowed items should be visible regardless of eligibility.
+    expect(isParticularsVisible('Daily Pass - Off Peak', ctx)).toBe(true);
+    expect(isParticularsVisible('Daily Coach - Off Peak', ctx)).toBe(true);
+    // Unknown items still hidden.
+    expect(isParticularsVisible('Daily Pass', ctx)).toBe(false);
+  });
 });
