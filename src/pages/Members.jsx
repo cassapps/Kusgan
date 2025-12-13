@@ -18,15 +18,17 @@ const MEMBERS_CACHE = {
   members: null,
   payments: null,
   gymEntries: null,
+  pricing: null,
   ts: {
     members: 0,
     payments: 0,
-    gymEntries: 0
+    gymEntries: 0,
+    pricing: 0,
   }
 };
 
 // LocalStorage persistence
-const CACHE_KEY = 'kusgan.members.cache.v1';
+const CACHE_KEY = 'kusgan.members.cache.v2';
 const CACHE_MAX_AGE = 1000 * 60 * 60; // 1 hour
 
 function loadCacheFromLocalStorage() {
@@ -41,6 +43,7 @@ function loadCacheFromLocalStorage() {
     MEMBERS_CACHE.members = parsed.members || null;
     MEMBERS_CACHE.payments = parsed.payments || null;
     MEMBERS_CACHE.gymEntries = parsed.gymEntries || null;
+    MEMBERS_CACHE.pricing = parsed.pricing || null;
     MEMBERS_CACHE.ts = parsed.ts || MEMBERS_CACHE.ts;
   } catch (e) {
     // ignore
@@ -55,6 +58,7 @@ function saveCacheToLocalStorage() {
       members: MEMBERS_CACHE.members,
       payments: MEMBERS_CACHE.payments,
       gymEntries: MEMBERS_CACHE.gymEntries,
+      pricing: MEMBERS_CACHE.pricing,
       ts: MEMBERS_CACHE.ts
     };
     // Persist asynchronously to avoid blocking the main thread during render/update cycles
@@ -147,16 +151,7 @@ const fmtDate = (d) => {
   return `${m}-${dt.getDate()}, ${dt.getFullYear()}`;
 };
 
-// Return true if the given date (ISO/Date/string) is >= today (date-only, Manila/local)
-const isDateActive = (d) => {
-  const dt = asDate(d);
-  if (!dt) return false;
-  const today = new Date();
-  today.setHours(0,0,0,0);
-  const x = new Date(dt);
-  x.setHours(0,0,0,0);
-  return x >= today;
-};
+// NOTE: Manila-date activity checks are centralized in computeStatusForMember.
 
 const ageFromBirthday = (bday) => {
   const d = asDate(bday);
@@ -168,55 +163,28 @@ const ageFromBirthday = (bday) => {
   return age;
 };
 
-// Payments: latest EndDate per member for membership/coach
-function buildPaymentIndex(paymentsRaw) {
-  // Group payments by member id, then compute status per-member using shared helper
+function buildStatusIndex({ membersRaw, paymentsRaw, pricingRows }) {
   const paymentsByMember = new Map();
-  for (const raw of paymentsRaw) {
+  for (const raw of (paymentsRaw || [])) {
     const p = normRow(raw);
-    const memberId = firstOf(p, ["memberid","member_id","id","member_id_"]);
+    const memberId = String(firstOf(p, ["memberid","member_id","id","member_id_"]) || '').trim();
     if (!memberId) continue;
     if (!paymentsByMember.has(memberId)) paymentsByMember.set(memberId, []);
     paymentsByMember.get(memberId).push(raw);
   }
-  const idx = new Map();
-  for (const [id, pays] of paymentsByMember) {
-    const st = computeStatusForMember(pays);
-    idx.set(id, { membershipEnd: st.membershipEnd || null, coachEnd: st.coachEnd || null, membershipState: st.membershipState || null, coachActive: !!st.coachActive });
-  }
-  return idx;
-}
-
-// Member-level fallback: build status index without loading payments
-function buildMemberStatusIndex(membersRaw) {
-  const pick = (o, keys) => {
-    for (const k of keys) {
-      if (o && Object.prototype.hasOwnProperty.call(o, k)) return o[k];
-      const alt = Object.keys(o || {}).find((kk) => kk.toLowerCase().replace(/\s+/g, "") === k.toLowerCase().replace(/\s+/g, ""));
-      if (alt) return o[alt];
-    }
-    return undefined;
-  };
 
   const idx = new Map();
-  for (const raw of (membersRaw || [])) {
-    const m = normRow(raw);
-    const memberId = firstOf(m, ["memberid","member_id","id","member_id_"]);
+  for (const m of (membersRaw || [])) {
+    const memberId = String(firstOf(m, ["memberid","member_id","id","member_id_"]) || '').trim();
     if (!memberId) continue;
-    const membershipEnd = pick(m, [
-      "membershipEnd","membership_end","membershipend",
-      "membership_end_date","membership_expiry","membershipexpires",
-      "gymvaliduntil","gym_valid_until","gym_until",
-      "enddate","end_date","valid_until","expiry","expires","until","end",
-    ]);
-    const coachEnd = pick(m, [
-      "coachEnd","coach_end","coachend",
-      "coach_subscription_end","coach_subscription_end_date","coachsubscriptionend",
-      "coachvaliduntil","coach_valid_until","coach_until","coach_expiry","coach_expires",
-    ]);
-    const membershipState = String(m.membershipState || m.membership_state || m.status || '').trim().toLowerCase() || null;
-    const coachActive = isDateActive(coachEnd);
-    idx.set(memberId, { membershipEnd: membershipEnd || null, coachEnd: coachEnd || null, membershipState, coachActive });
+    const pays = paymentsByMember.get(memberId) || [];
+    const st = computeStatusForMember(pays, m, pricingRows || []);
+    idx.set(memberId, {
+      membershipEnd: st.membershipEnd || null,
+      coachEnd: st.coachEnd || null,
+      membershipState: st.membershipState || null,
+      coachActive: !!st.coachActive,
+    });
   }
   return idx;
 }
@@ -244,6 +212,7 @@ export default function Members() {
   const [rows, setRows] = useState([]);
   const [payIdx, setPayIdx] = useState(new Map());
   const [visitIdx, setVisitIdx] = useState(new Map());
+  const [pricingRows, setPricingRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showLoadingToast, setShowLoadingToast] = useState(false);
   const [error, setError] = useState("");
@@ -272,28 +241,34 @@ export default function Members() {
     return () => window.removeEventListener('resize', recompute);
   }, []);
 
-  // SWR fetcher: fetch recent members + payments + gymEntries
+  // SWR fetcher: fetch members + active payments + gymEntries
   const membersFetcher = async () => {
-    // Show members created/visited/purchased in the last 5 days for the "All Members" view
-    const recentDays = 5;
-    const [mRes, gRes] = await Promise.all([
-      api.fetchMembersRecent({ days: recentDays }),
+    const paymentsPromise = (typeof api.fetchPaymentsActive === 'function')
+      ? api.fetchPaymentsActive({ limit: 4000 }).catch(() => api.fetchPayments())
+      : api.fetchPayments();
+
+    const [mRes, pRes, gRes, prRes] = await Promise.all([
+      api.fetchMembers(),
+      paymentsPromise,
       api.fetchGymEntriesSince({ days: 60, limit: 3000 }),
+      api.fetchPricing(),
     ]);
+
     return {
       members: (mRes?.rows ?? mRes?.data ?? []).map(normRow),
-      payments: (mRes?.payments ?? []),
-      gymEntries: (gRes?.rows ?? gRes?.data ?? [])
+      payments: (pRes?.rows ?? pRes?.data ?? []),
+      gymEntries: (gRes?.rows ?? gRes?.data ?? []),
+      pricing: (prRes?.rows ?? prRes?.data ?? []),
     };
   };
 
   const { data, error: swrError, isLoading: swrLoading, isValidating, mutate } = useSWR(
-    'members:recent',
+    'members:all',
     membersFetcher,
     {
       revalidateOnFocus: useFirestore ? false : true,
       dedupingInterval: 2000,
-      fallbackData: MEMBERS_CACHE.members ? { members: MEMBERS_CACHE.members, payments: MEMBERS_CACHE.payments, gymEntries: MEMBERS_CACHE.gymEntries } : undefined
+      fallbackData: MEMBERS_CACHE.members ? { members: MEMBERS_CACHE.members, payments: MEMBERS_CACHE.payments, gymEntries: MEMBERS_CACHE.gymEntries, pricing: MEMBERS_CACHE.pricing } : undefined
     }
   );
 
@@ -302,23 +277,26 @@ export default function Members() {
     if (!data) return;
     try {
       setRows(data.members || []);
+      setPricingRows(data.pricing || []);
       if (useFirestore) {
         const pays = data.payments || [];
         paymentsRef.current = pays;
-        setPayIdx((pays && pays.length) ? buildPaymentIndex(pays) : buildMemberStatusIndex(data.members || []));
+        setPayIdx(buildStatusIndex({ membersRaw: data.members || [], paymentsRaw: pays || [], pricingRows: data.pricing || [] }));
       } else {
         paymentsRef.current = data.payments || [];
-        setPayIdx(buildPaymentIndex(data.payments || []));
+        setPayIdx(buildStatusIndex({ membersRaw: data.members || [], paymentsRaw: data.payments || [], pricingRows: data.pricing || [] }));
       }
       setVisitIdx(buildLastVisitIndex(data.gymEntries || []));
       MEMBERS_CACHE.members = data.members || [];
       MEMBERS_CACHE.payments = data.payments || [];
       MEMBERS_CACHE.gymEntries = data.gymEntries || [];
+      MEMBERS_CACHE.pricing = data.pricing || [];
       // update timestamps and persist to localStorage
       MEMBERS_CACHE.ts = MEMBERS_CACHE.ts || {};
       MEMBERS_CACHE.ts.members = Date.now();
       MEMBERS_CACHE.ts.payments = Date.now();
       MEMBERS_CACHE.ts.gymEntries = Date.now();
+      MEMBERS_CACHE.ts.pricing = Date.now();
       saveCacheToLocalStorage();
     } catch (e) {
       console.error('Members: failed to hydrate from SWR data', e);
@@ -354,9 +332,9 @@ export default function Members() {
             const mid = String(p?.MemberID || p?.member_id || p?.memberId || p?.memberid || p?.id || '').trim();
             return mid && ids.has(mid);
           });
-          setPayIdx(relevantPays.length ? buildPaymentIndex(relevantPays) : buildMemberStatusIndex(members));
+          setPayIdx(buildStatusIndex({ membersRaw: members, paymentsRaw: relevantPays || [], pricingRows }));
         } else {
-          setPayIdx(buildMemberStatusIndex(members));
+          setPayIdx(buildStatusIndex({ membersRaw: members, paymentsRaw: [], pricingRows }));
         }
       } catch (e) {
         if (!cancelled) setError(e?.message || String(e));
@@ -366,7 +344,7 @@ export default function Members() {
     }
     if (debouncedQ) doSearch();
     return () => { cancelled = true; };
-  }, [debouncedQ, useFirestore]);
+  }, [debouncedQ, useFirestore, pricingRows]);
 
   // mirror SWR loading/error into local state for existing UI
   useEffect(() => {
@@ -409,8 +387,8 @@ export default function Members() {
       const pay = memberId ? payIdx.get(memberId) : undefined;
       const gymUntil = pay?.membershipEnd || null;
       const coachUntil = pay?.coachEnd || null;
-      const gymActive = isDateActive(gymUntil);
-      const coachActive = isDateActive(coachUntil);
+      const gymActive = pay?.membershipState === 'active';
+      const coachActive = !!pay?.coachActive;
       const isActive = gymActive || coachActive;
 
       const first = String(firstOf(r, ["first_name", "firstname", "first", "given_name"]) ?? "");
@@ -474,6 +452,10 @@ export default function Members() {
         <button className="button" onClick={() => setOpenAdd(true)}>+ Add Member</button>
       </div>
 
+      <div style={{ textAlign: 'center', color: 'var(--muted)', marginBottom: 12 }}>
+        Showing members with active membership...
+      </div>
+
       {/* Top loading toast removed — table shows its own inline Loading message */}
   {loading && (<div style={{ color: 'var(--muted)', textAlign: 'center', padding: 16 }}>Loading…</div>)}
       {error && <div>Error: {error}</div>}
@@ -515,6 +497,9 @@ export default function Members() {
                   </thead>
                   <tbody>
                     {membersPager.visible.map(({ r, lastVisit, isToday, memberId, gymUntil, coachUntil }, i) => {
+                      const pay = memberId ? payIdx.get(memberId) : undefined;
+                      const gymActive = pay?.membershipState === 'active';
+                      const coachActive = !!pay?.coachActive;
                       const first = String(firstOf(r, ["first_name","firstname","first","given_name"]) ?? "");
                       const last = String(firstOf(r, ["last_name","lastname","last","surname"]) ?? "");
                       const fullName = [first, last].filter(Boolean).map(toTitleCase).join(" ");
@@ -541,8 +526,8 @@ export default function Members() {
                            {/* <img src={photoUrl} loading="lazy" srcSet={photoSrcSet} alt={fullName} style={{ maxWidth: 40, borderRadius: '50%' }} /> */}
                           <td style={{ textAlign: 'center' }}>{fmtDate(memberSince)}</td>
                           <td style={{ textAlign: 'center' }}>{isToday ? <span className="pill ok">Visited today</span> : (lastVisit ? fmtDate(new Date(lastVisit)) : "")}</td>
-                          <td style={{ textAlign: 'center', color: gymUntil ? (isDateActive(gymUntil) ? 'green' : 'red') : 'inherit' }}>{gymUntil ? fmtDate(gymUntil) : ""}</td>
-                          <td style={{ textAlign: 'center', color: coachUntil ? (isDateActive(coachUntil) ? 'green' : 'red') : 'inherit' }}>{coachUntil ? fmtDate(coachUntil) : ""}</td>
+                          <td style={{ textAlign: 'center', color: gymUntil ? (gymActive ? 'green' : 'red') : 'inherit' }}>{gymUntil ? fmtDate(gymUntil) : ""}</td>
+                          <td style={{ textAlign: 'center', color: coachUntil ? (coachActive ? 'green' : 'red') : 'inherit' }}>{coachUntil ? fmtDate(coachUntil) : ""}</td>
                         </tr>
                       );
                     })}
@@ -574,6 +559,9 @@ export default function Members() {
                 >
                 {({ index, style }) => {
                   const { r, lastVisit, isToday, memberId, gymUntil, coachUntil } = membersPager.visible[index];
+                  const pay = memberId ? payIdx.get(memberId) : undefined;
+                  const gymActive = pay?.membershipState === 'active';
+                  const coachActive = !!pay?.coachActive;
                   const first = String(firstOf(r, ["first_name","firstname","first","given_name"]) ?? "");
                   const last = String(firstOf(r, ["last_name","lastname","last","surname"]) ?? "");
                   const fullName = [first, last].filter(Boolean).map(toTitleCase).join(" ");
@@ -600,8 +588,8 @@ export default function Members() {
                       <div style={{ width: '25%', textAlign: 'center' }}>{fullName}</div>
                       <div style={{ width: '15%', textAlign: 'center' }}>{fmtDate(memberSince)}</div>
                       <div style={{ width: '15%', textAlign: 'center' }}>{isToday ? <span className="pill ok">Visited today</span> : (lastVisit ? fmtDate(new Date(lastVisit)) : "")}</div>
-                      <div style={{ width: '15%', textAlign: 'center', color: gymUntil ? (isDateActive(gymUntil) ? 'green' : 'red') : 'inherit' }}>{gymUntil ? fmtDate(gymUntil) : ""}</div>
-                      <div style={{ width: '15%', textAlign: 'center', color: coachUntil ? (isDateActive(coachUntil) ? 'green' : 'red') : 'inherit' }}>{coachUntil ? fmtDate(coachUntil) : ""}</div>
+                      <div style={{ width: '15%', textAlign: 'center', color: gymUntil ? (gymActive ? 'green' : 'red') : 'inherit' }}>{gymUntil ? fmtDate(gymUntil) : ""}</div>
+                      <div style={{ width: '15%', textAlign: 'center', color: coachUntil ? (coachActive ? 'green' : 'red') : 'inherit' }}>{coachUntil ? fmtDate(coachUntil) : ""}</div>
                     </div>
                   );
                 }}
