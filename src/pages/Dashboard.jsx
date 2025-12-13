@@ -1055,17 +1055,15 @@ export default function Dashboard() {
           <div style={{ overflowX: 'auto' }}>
             <table className="attendance-table aligned" style={{ width: '100%' }}>
               <colgroup>
-                <col style={{ width: '15%' }} />
-                <col style={{ width: '25%' }} />
-                <col style={{ width: '15%' }} />
-                <col style={{ width: '15%' }} />
-                <col style={{ width: '15%' }} />
-                <col style={{ width: '15%' }} />
+                <col style={{ width: '20%' }} />
+                <col style={{ width: '20%' }} />
+                <col style={{ width: '20%' }} />
+                <col style={{ width: '20%' }} />
+                <col style={{ width: '20%' }} />
               </colgroup>
               <thead>
                 <tr>
                   <th style={{ textAlign: 'center' }}>Nick Name</th>
-                  <th style={{ textAlign: 'center' }}>Full Name</th>
                   <th style={{ textAlign: 'center' }}>Member Since</th>
                   <th style={{ textAlign: 'center' }}>Last Gym Visit</th>
                   <th style={{ textAlign: 'center' }}>Gym Valid Until</th>
@@ -1074,17 +1072,23 @@ export default function Dashboard() {
               </thead>
               <tbody>
                 {(() => {
-                  if (!activeList || activeList.length === 0) return <tr><td colSpan={6}>-</td></tr>;
+                  if (!activeList || activeList.length === 0) return <tr><td colSpan={5}>-</td></tr>;
                   return activePager.visible.map(({ member: m, memberId, st }, idx) => {
                     const nick = resolveNick(m).toUpperCase();
-                    const fullName = resolveFullName(m);
                     const memberSince = resolveMemberSince(m);
                     const lastVisit = lastVisitByMember.get(memberId) || null;
                     const gymUntil = st?.membershipEnd || null;
                     const coachUntil = st?.coachEnd || null;
                     const pills = m ? getMemberPills(m) : [];
                     return (
-                      <tr key={idx}>
+                      <tr
+                        key={idx}
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => {
+                          if (!memberId) return;
+                          navigate(`/members/${encodeURIComponent(memberId)}`, { state: { row: m } });
+                        }}
+                      >
                         <td style={{ textAlign: 'center' }}>
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
                             <strong>{nick}</strong>
@@ -1095,7 +1099,6 @@ export default function Dashboard() {
                             )}
                           </span>
                         </td>
-                        <td style={{ textAlign: 'left' }}>{fullName}</td>
                         <td style={{ textAlign: 'center' }}>{fmtDate(memberSince)}</td>
                         <td style={{ textAlign: 'center' }}>{lastVisit ? fmtDate(lastVisit) : ''}</td>
                         <td style={{ textAlign: 'center', color: gymUntil ? (isDateActive(gymUntil) ? 'green' : 'red') : 'inherit' }}>{gymUntil ? fmtDate(gymUntil) : ''}</td>

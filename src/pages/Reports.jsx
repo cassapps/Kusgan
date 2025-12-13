@@ -517,15 +517,15 @@ export default function Reports() {
         {/* Row 2: revenue/expenses/profit */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 32, maxWidth: 1100, margin: "32px auto 0" }}>
           <div className="dashboard-card">
-            <div className="dashboard-label">Revenue</div>
+            <div className="dashboard-label">Month Revenue</div>
             <div className="dashboard-value magenta">₱ {Number(monthlyRevenue || 0).toLocaleString()}</div>
           </div>
           <div className="dashboard-card">
-            <div className="dashboard-label">Monthly Expenses</div>
+            <div className="dashboard-label">Month Expenses</div>
             <div className="dashboard-value magenta">₱ {Number(monthlyExpenses || 0).toLocaleString()}</div>
           </div>
           <div className="dashboard-card">
-            <div className="dashboard-label">Monthly Profit</div>
+            <div className="dashboard-label">Month Profit</div>
             <div className="dashboard-value magenta">₱ {Number(monthlyProfit || 0).toLocaleString()}</div>
           </div>
         </div>
