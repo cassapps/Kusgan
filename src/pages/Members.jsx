@@ -383,33 +383,68 @@ export default function Members() {
   }, [q]);
 
   const filteredSorted = useMemo(() => {
-  const term = debouncedQ.trim().toLowerCase();
-    let list = rows;
-    if (term) {
-      list = rows.filter(r =>
-        ["first_name","firstname","last_name","lastname","nick_name","nickname","mobile","email"]
-          .some(k => String(r[k] ?? "").toLowerCase().includes(term))
-      );
-    }
+    const term = debouncedQ.trim().toLowerCase();
+
     const today = new Date();
-    const withVisit = list.map(r => {
-      const memberId = firstOf(r, ["memberid","member_id","id","member_id_"]);
+    const withVisit = (rows || []).map((r) => {
+      const memberId = String(firstOf(r, ["memberid", "member_id", "id", "member_id_"]) || "").trim();
       const lastVisit = memberId ? visitIdx.get(memberId) : null;
       const isToday = lastVisit ? isSameDay(lastVisit, today) : false;
 
-      // NEW: use join date for primary sort (most recent first)
-      // Try several common field names that may appear in different data sources
-      const joined = asDate(firstOf(r, ["member_since","membersince","member_date","memberdate","member_date","createdat","created_at","join_date","joined","start_date"]));
+      // Sort key: newest join first, then by last visit (desc)
+      const joined = resolveMemberSince(r) || asDate(firstOf(r, [
+        "member_since",
+        "membersince",
+        "member_date",
+        "memberdate",
+        "createdat",
+        "created_at",
+        "join_date",
+        "joined",
+        "start_date",
+      ]));
       const joinTs = joined ? joined.getTime() : 0;
-
       const visitTs = lastVisit ? lastVisit.getTime() : -1;
-      return { r, lastVisit, isToday, joinTs, visitTs, memberId };
+
+      const pay = memberId ? payIdx.get(memberId) : undefined;
+      const gymUntil = pay?.membershipEnd || null;
+      const coachUntil = pay?.coachEnd || null;
+      const gymActive = isDateActive(gymUntil);
+      const coachActive = isDateActive(coachUntil);
+      const isActive = gymActive || coachActive;
+
+      const first = String(firstOf(r, ["first_name", "firstname", "first", "given_name"]) ?? "");
+      const last = String(firstOf(r, ["last_name", "lastname", "last", "surname"]) ?? "");
+      const fullName = [first, last].filter(Boolean).join(" ");
+      const nick = String(firstOf(r, ["nick_name", "nickname", "NickName", "Nickname", "nickName"]) ?? "");
+      const matches = !term
+        ? true
+        : (
+            nick.toLowerCase().includes(term) ||
+            fullName.toLowerCase().includes(term)
+          );
+
+      return {
+        r,
+        memberId,
+        lastVisit,
+        isToday,
+        joinTs,
+        visitTs,
+        gymUntil,
+        coachUntil,
+        isActive,
+        matches,
+      };
     });
 
-    // Sort: newest join first, then by last visit (desc)
-    withVisit.sort((a, b) => (b.joinTs - a.joinTs) || (b.visitTs - a.visitTs));
-    return withVisit;
-  }, [rows, debouncedQ, visitIdx]);
+    // FIRST: show only active members (active gym OR active coach)
+    const activeOnly = withVisit.filter((x) => x.isActive);
+    const searched = activeOnly.filter((x) => x.matches);
+
+    searched.sort((a, b) => (b.joinTs - a.joinTs) || (b.visitTs - a.visitTs));
+    return searched;
+  }, [rows, debouncedQ, visitIdx, payIdx]);
 
   const membersPager = useLoadMore(filteredSorted, {
     initial: 20,
@@ -454,7 +489,7 @@ export default function Members() {
           {/* Virtualized list for rows */}
           <div style={{ width: '100%' }}>
             {filteredSorted.length === 0 ? (
-              <div style={{ padding: 12 }}>No members found.</div>
+              <div style={{ padding: 12 }}>No active members found.</div>
             ) : filteredSorted.length <= SMALL_TABLE_THRESHOLD ? (
               // Render a normal table for small result sets so it matches other pages
               <div className="members-list-wrapper" style={{ display: 'flex', justifyContent: 'center' }}>
@@ -479,8 +514,7 @@ export default function Members() {
                     </tr>
                   </thead>
                   <tbody>
-                    {membersPager.visible.map(({ r, lastVisit, isToday, memberId }, i) => {
-                      const pay = memberId ? payIdx.get(memberId) : undefined;
+                    {membersPager.visible.map(({ r, lastVisit, isToday, memberId, gymUntil, coachUntil }, i) => {
                       const first = String(firstOf(r, ["first_name","firstname","first","given_name"]) ?? "");
                       const last = String(firstOf(r, ["last_name","lastname","last","surname"]) ?? "");
                       const fullName = [first, last].filter(Boolean).map(toTitleCase).join(" ");
@@ -490,8 +524,6 @@ export default function Members() {
                       // const photoUrl = r.photoUrl || '';
                       // const photoSrcSet = r.photoSrcSet || '';
                       const memberSince = resolveMemberSince(r) || asDate(firstOf(r, ["member_since","membersince","member_date","memberdate","member_date","createdat","created_at","join_date","joined","start_date"]));
-                      const gymUntil = pay?.membershipEnd || null;
-                      const coachUntil = pay?.coachEnd || null;
                       return (
                         <tr key={i} className="row-link" onClick={() => navigate(`/members/${encodeURIComponent(memberId)}`, { state: { row: r } })} style={{ cursor: 'pointer' }}>
                            <td style={{ textAlign: 'center' }}>
@@ -504,13 +536,13 @@ export default function Members() {
                                )}
                              </span>
                            </td>
-                           <td style={{ textAlign: 'left' }}>{fullName}</td>
+                           <td style={{ textAlign: 'center' }}>{fullName}</td>
                            {/* Example image optimization for member photo */}
                            {/* <img src={photoUrl} loading="lazy" srcSet={photoSrcSet} alt={fullName} style={{ maxWidth: 40, borderRadius: '50%' }} /> */}
                           <td style={{ textAlign: 'center' }}>{fmtDate(memberSince)}</td>
                           <td style={{ textAlign: 'center' }}>{isToday ? <span className="pill ok">Visited today</span> : (lastVisit ? fmtDate(new Date(lastVisit)) : "")}</td>
-                          <td style={{ textAlign: 'center', color: gymUntil ? (isDateActive(gymUntil) ? 'green' : 'red') : 'inherit' }}>{gymUntil ? fmtDate(new Date(gymUntil)) : ""}</td>
-                          <td style={{ textAlign: 'center', color: coachUntil ? (isDateActive(coachUntil) ? 'green' : 'red') : 'inherit' }}>{coachUntil ? fmtDate(new Date(coachUntil)) : ""}</td>
+                          <td style={{ textAlign: 'center', color: gymUntil ? (isDateActive(gymUntil) ? 'green' : 'red') : 'inherit' }}>{gymUntil ? fmtDate(gymUntil) : ""}</td>
+                          <td style={{ textAlign: 'center', color: coachUntil ? (isDateActive(coachUntil) ? 'green' : 'red') : 'inherit' }}>{coachUntil ? fmtDate(coachUntil) : ""}</td>
                         </tr>
                       );
                     })}
@@ -528,7 +560,7 @@ export default function Members() {
               <div className="members-list-wrapper" style={{ width: '100%', display: 'flex', flexDirection: 'column', flex: 1 }}>
                 <div style={{ display: 'flex', padding: '8px 12px', fontWeight: 700, borderBottom: '1px solid var(--light-border)', background: 'var(--panel-header-bg)' }}>
                   <div style={{ width: '15%', textAlign: 'center' }}>Nick Name</div>
-                  <div style={{ width: '25%', textAlign: 'left' }}>Full Name</div>
+                  <div style={{ width: '25%', textAlign: 'center' }}>Full Name</div>
                   <div style={{ width: '15%', textAlign: 'center' }}>Member Since</div>
                   <div style={{ width: '15%', textAlign: 'center' }}>Last Gym Visit</div>
                   <div style={{ width: '15%', textAlign: 'center' }}>Gym Valid Until</div>
@@ -541,17 +573,13 @@ export default function Members() {
                   width={'100%'}
                 >
                 {({ index, style }) => {
-                  const { r, lastVisit, isToday, memberId } = membersPager.visible[index];
-                  const pay = memberId ? payIdx.get(memberId) : undefined;
+                  const { r, lastVisit, isToday, memberId, gymUntil, coachUntil } = membersPager.visible[index];
                   const first = String(firstOf(r, ["first_name","firstname","first","given_name"]) ?? "");
                   const last = String(firstOf(r, ["last_name","lastname","last","surname"]) ?? "");
                   const fullName = [first, last].filter(Boolean).map(toTitleCase).join(" ");
                   const nick = String(r.nick_name ?? r.nickname ?? "").toUpperCase();
                   const pills = getMemberPills(r);
                   const memberSince = resolveMemberSince(r) || asDate(firstOf(r, ["member_since","membersince","member_date","memberdate","member_date","createdat","created_at","join_date","joined","start_date"]));
-                  const today = new Date();
-                  const gymUntil = pay?.membershipEnd || null;
-                  const coachUntil = pay?.coachEnd || null;
                   return (
                     <div
                       key={index}
@@ -569,11 +597,11 @@ export default function Members() {
                           )}
                         </span>
                       </div>
-                      <div style={{ width: '25%' }}>{fullName}</div>
+                      <div style={{ width: '25%', textAlign: 'center' }}>{fullName}</div>
                       <div style={{ width: '15%', textAlign: 'center' }}>{fmtDate(memberSince)}</div>
                       <div style={{ width: '15%', textAlign: 'center' }}>{isToday ? <span className="pill ok">Visited today</span> : (lastVisit ? fmtDate(new Date(lastVisit)) : "")}</div>
-                      <div style={{ width: '15%', textAlign: 'center', color: gymUntil ? (isDateActive(gymUntil) ? 'green' : 'red') : 'inherit' }}>{gymUntil ? fmtDate(new Date(gymUntil)) : ""}</div>
-                      <div style={{ width: '15%', textAlign: 'center', color: coachUntil ? (isDateActive(coachUntil) ? 'green' : 'red') : 'inherit' }}>{coachUntil ? fmtDate(new Date(coachUntil)) : ""}</div>
+                      <div style={{ width: '15%', textAlign: 'center', color: gymUntil ? (isDateActive(gymUntil) ? 'green' : 'red') : 'inherit' }}>{gymUntil ? fmtDate(gymUntil) : ""}</div>
+                      <div style={{ width: '15%', textAlign: 'center', color: coachUntil ? (isDateActive(coachUntil) ? 'green' : 'red') : 'inherit' }}>{coachUntil ? fmtDate(coachUntil) : ""}</div>
                     </div>
                   );
                 }}
