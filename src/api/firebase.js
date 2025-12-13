@@ -11,6 +11,7 @@ const COLS = {
   gymEntries: 'gymEntries',
   payments: 'payments',
   expenses: 'expenses',
+  revenues: 'revenues',
   progress: 'progress',
   attendance: 'attendance',
   pricing: 'pricing',
@@ -971,6 +972,27 @@ export async function addPayment(payload) {
   return { ok: true, id: r.id };
 }
 
+export async function addExpense(payload) {
+  const safe = { ...(payload || {}) };
+  if (!safe.Date) safe.Date = manilaYMD(new Date());
+  // Normalize amount field so reporting sums are consistent.
+  if (safe.Amount === undefined && safe.amount === undefined) {
+    if (safe.Cost !== undefined) safe.Amount = safe.Cost;
+    if (safe.cost !== undefined) safe.Amount = safe.cost;
+  }
+  safe.timestamp = safe.timestamp || serverTimestamp();
+  const r = await fb.addDocument(COLS.expenses, safe);
+  return { ok: true, id: r.id };
+}
+
+export async function addRevenue(payload) {
+  const safe = { ...(payload || {}) };
+  if (!safe.Date) safe.Date = manilaYMD(new Date());
+  safe.timestamp = safe.timestamp || serverTimestamp();
+  const r = await fb.addDocument(COLS.revenues, safe);
+  return { ok: true, id: r.id };
+}
+
 export async function fetchPaymentsSince({ days = 30, limit = 2000 } = {}) {
   const cutoff = new Date(Date.now() - (days * 24 * 60 * 60 * 1000));
   const cutoffYMD = cutoff.toISOString().slice(0, 10);
@@ -1072,6 +1094,38 @@ export async function fetchExpensesForMonth(monthKey, { limit = 8000 } = {}) {
     if (rows && rows.length) return { rows };
     if (startTs && endTs) {
       const rowsTs = await fb.queryCollection(COLS.expenses, {
+        wheres: [
+          { field: 'Date', op: '>=', value: startTs },
+          { field: 'Date', op: '<', value: endTs },
+        ],
+        limit,
+      });
+      return { rows: rowsTs || [] };
+    }
+    return { rows: [] };
+  } catch (e) {
+    return { rows: [] };
+  }
+}
+
+export async function fetchRevenuesForMonth(monthKey, { limit = 8000 } = {}) {
+  const mk = String(monthKey || '').trim();
+  if (!mk || !/^\d{4}-\d{2}$/.test(mk)) return { rows: [] };
+  const start = `${mk}-01`;
+  const nextMonth = ymdMonthNext(mk);
+  const endExclusive = nextMonth ? `${nextMonth}-01` : `${mk}-32`;
+  const { start: startTs, end: endTs } = monthKeyToLocalRange(mk);
+  try {
+    const rows = await fb.queryCollection(COLS.revenues, {
+      wheres: [
+        { field: 'Date', op: '>=', value: start },
+        { field: 'Date', op: '<', value: endExclusive },
+      ],
+      limit,
+    });
+    if (rows && rows.length) return { rows };
+    if (startTs && endTs) {
+      const rowsTs = await fb.queryCollection(COLS.revenues, {
         wheres: [
           { field: 'Date', op: '>=', value: startTs },
           { field: 'Date', op: '<', value: endTs },
@@ -1335,6 +1389,59 @@ export function listenExpensesForMonth(monthKey, onRows, onError) {
   return () => { for (const u of unsubs) { try { u && u(); } catch (e) {} } };
 }
 
+export function listenRevenuesForMonth(monthKey, onRows, onError) {
+  const mk = String(monthKey || '').trim();
+  if (!mk || !/^\d{4}-\d{2}$/.test(mk)) return () => {};
+  const start = `${mk}-01`;
+  const nextMonth = ymdMonthNext(mk);
+  const endExclusive = nextMonth ? `${nextMonth}-01` : `${mk}-32`;
+  const { start: startTs, end: endTs } = monthKeyToLocalRange(mk);
+  let rowsA = [];
+  let rowsB = [];
+  const emit = () => {
+    try { onRows && onRows(mergeById(rowsA, rowsB)); } catch (e) { /* ignore */ }
+  };
+  const unsubs = [];
+
+  try {
+    unsubs.push(
+      fb.listenQueryCollection(
+        COLS.revenues,
+        {
+          wheres: [
+            { field: 'Date', op: '>=', value: start },
+            { field: 'Date', op: '<', value: endExclusive },
+          ],
+          limit: 8000,
+        },
+        (r) => { rowsA = r || []; emit(); },
+        onError
+      )
+    );
+  } catch (e) { /* ignore */ }
+
+  if (startTs && endTs) {
+    try {
+      unsubs.push(
+        fb.listenQueryCollection(
+          COLS.revenues,
+          {
+            wheres: [
+              { field: 'Date', op: '>=', value: startTs },
+              { field: 'Date', op: '<', value: endTs },
+            ],
+            limit: 8000,
+          },
+          (r) => { rowsB = r || []; emit(); },
+          onError
+        )
+      );
+    } catch (e) { /* ignore */ }
+  }
+
+  return () => { for (const u of unsubs) { try { u && u(); } catch (e) {} } };
+}
+
 // Upload photo helpers (client). Uses Firebase Storage via fb.uploadFile
 export async function uploadMemberPhoto(fileOrArgs, baseId) {
   // Accept file Blob/File or object { memberId, filename, mime, data }
@@ -1486,10 +1593,11 @@ const api = {
   fetchMembersRecent, searchMembersByName,
   fetchGymEntriesSince, fetchGymEntriesForDate,
   fetchPaymentsSince, fetchPaymentsForDate, fetchPaymentsForMonth,
-  fetchExpensesForMonth,
+  fetchExpensesForMonth, fetchRevenuesForMonth,
   listenMembers, listenGymEntriesForDate, listenPaymentsForDate, listenPaymentsForMonth,
-  listenExpensesForMonth,
+  listenExpensesForMonth, listenRevenuesForMonth,
   listenPaymentsActive,
+  addExpense, addRevenue,
   addPricing, updatePricing, uploadPhoto,
 };
 

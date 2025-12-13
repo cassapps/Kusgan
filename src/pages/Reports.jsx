@@ -2,8 +2,29 @@ import { useEffect, useMemo, useState } from "react";
 import api from "../api";
 import displayName from "../lib/displayName";
 import { fmtDate, fmtDateTime, display } from "./MemberDetail.jsx";
+import ModalWrapper from "../components/ModalWrapper.jsx";
 
-const { fetchMembers, listenMembers, listenPaymentsForMonth, fetchPaymentsForMonth, fetchExpensesForMonth } = api;
+const {
+  fetchMembers,
+  listenMembers,
+  listenPaymentsForMonth,
+  fetchPaymentsForMonth,
+  fetchExpensesForMonth,
+  listenExpensesForMonth,
+  fetchRevenuesForMonth,
+  listenRevenuesForMonth,
+  addExpense,
+  addRevenue,
+} = api;
+
+const MANILA_TZ = "Asia/Manila";
+const manilaTodayYMD = () =>
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone: MANILA_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
 
 function monthKeyForDate(d) {
   try {
@@ -83,7 +104,19 @@ export default function Reports() {
   const [selectedMonthKey, setSelectedMonthKey] = useState(defaultMonthKey);
   const [members, setMembers] = useState([]);
   const [paymentsMonth, setPaymentsMonth] = useState([]);
+  const [revenuesMonth, setRevenuesMonth] = useState([]);
+  const [expensesMonth, setExpensesMonth] = useState([]);
   const [totalsByMonth, setTotalsByMonth] = useState({}); // { [monthKey]: { revenue, expenses } }
+
+  const [revCollapsed, setRevCollapsed] = useState(false);
+  const [openAddRevenue, setOpenAddRevenue] = useState(false);
+  const [openAddExpense, setOpenAddExpense] = useState(false);
+  const [revenueForm, setRevenueForm] = useState({ Date: manilaTodayYMD(), Category: "Grocery", Particulars: "", Mode: "Cash", Cost: "" });
+  const [expenseForm, setExpenseForm] = useState({ Date: manilaTodayYMD(), Category: "Equipment", Item: "", Cost: "" });
+  const [revBusy, setRevBusy] = useState(false);
+  const [expBusy, setExpBusy] = useState(false);
+  const [revErr, setRevErr] = useState("");
+  const [expErr, setExpErr] = useState("");
 
   useEffect(() => {
     if (!useFirestore) {
@@ -141,6 +174,50 @@ export default function Reports() {
     };
   }, [useFirestore, selectedMonthKey]);
 
+  // Monthly manual revenues (realtime in Firestore mode).
+  useEffect(() => {
+    if (!useFirestore) {
+      (async () => {
+        try {
+          const r = await fetchRevenuesForMonth(selectedMonthKey);
+          setRevenuesMonth(r?.rows || []);
+        } catch (e) {
+          setRevenuesMonth([]);
+        }
+      })();
+      return;
+    }
+    let unsub = null;
+    try {
+      unsub = listenRevenuesForMonth(selectedMonthKey, (rows) => setRevenuesMonth(rows || []), () => {});
+    } catch (e) {
+      unsub = null;
+    }
+    return () => { try { unsub && unsub(); } catch (e) {} };
+  }, [useFirestore, selectedMonthKey]);
+
+  // Monthly expenses (realtime in Firestore mode).
+  useEffect(() => {
+    if (!useFirestore) {
+      (async () => {
+        try {
+          const r = await fetchExpensesForMonth(selectedMonthKey);
+          setExpensesMonth(r?.rows || []);
+        } catch (e) {
+          setExpensesMonth([]);
+        }
+      })();
+      return;
+    }
+    let unsub = null;
+    try {
+      unsub = listenExpensesForMonth(selectedMonthKey, (rows) => setExpensesMonth(rows || []), () => {});
+    } catch (e) {
+      unsub = null;
+    }
+    return () => { try { unsub && unsub(); } catch (e) {} };
+  }, [useFirestore, selectedMonthKey]);
+
   // Compute totals (revenue + expenses) for months needed to derive balances.
   useEffect(() => {
     let alive = true;
@@ -158,12 +235,13 @@ export default function Reports() {
         return { ...(prev || {}), [mk]: { revenue: 0, expenses: 0, _loading: true } };
       });
       try {
-        const [payRes, expRes] = await Promise.all([
+        const [payRes, revRes, expRes] = await Promise.all([
           fetchPaymentsForMonth(mk),
+          fetchRevenuesForMonth(mk),
           fetchExpensesForMonth(mk),
         ]);
         if (!alive) return;
-        const revenue = sumRevenue(payRes?.rows || payRes?.data || []);
+        const revenue = sumRevenue(payRes?.rows || payRes?.data || []) + sumRevenue(revRes?.rows || revRes?.data || []);
         const expenses = sumExpenses(expRes?.rows || expRes?.data || []);
         setTotalsByMonth((prev) => ({
           ...(prev || {}),
@@ -193,14 +271,27 @@ export default function Reports() {
     };
   }, [selectedMonthKey]);
 
+  // Keep selected month totals in sync with live table rows (payments + manual revenues + expenses).
+  useEffect(() => {
+    const rev =
+      (paymentsMonth || []).reduce((s, p) => s + (parseFloat(p?.Cost || p?.amount || 0) || 0), 0) +
+      (revenuesMonth || []).reduce((s, r) => s + (parseFloat(r?.Cost || r?.amount || 0) || 0), 0);
+    const exp = (expensesMonth || []).reduce((s, e) => s + (parseFloat(e?.Amount || e?.amount || 0) || 0), 0);
+    setTotalsByMonth((prev) => ({
+      ...(prev || {}),
+      [selectedMonthKey]: { revenue: rev, expenses: exp },
+    }));
+  }, [selectedMonthKey, paymentsMonth, revenuesMonth, expensesMonth]);
+
   const monthlyRevenue = useMemo(() => {
-    return (paymentsMonth || []).reduce((sum, p) => sum + (parseFloat(p?.Cost || p?.amount || 0) || 0), 0);
-  }, [paymentsMonth]);
+    const pay = (paymentsMonth || []).reduce((sum, p) => sum + (parseFloat(p?.Cost || p?.amount || 0) || 0), 0);
+    const manual = (revenuesMonth || []).reduce((sum, r) => sum + (parseFloat(r?.Cost || r?.amount || 0) || 0), 0);
+    return pay + manual;
+  }, [paymentsMonth, revenuesMonth]);
 
   const monthlyExpenses = useMemo(() => {
-    const t = totalsByMonth?.[selectedMonthKey];
-    return t ? (parseFloat(t.expenses) || 0) : 0;
-  }, [totalsByMonth, selectedMonthKey]);
+    return (expensesMonth || []).reduce((sum, e) => sum + (parseFloat(e?.Amount || e?.amount || 0) || 0), 0);
+  }, [expensesMonth]);
 
   const monthlyProfit = useMemo(() => (monthlyRevenue || 0) - (monthlyExpenses || 0), [monthlyRevenue, monthlyExpenses]);
 
@@ -237,26 +328,121 @@ export default function Reports() {
       return isNaN(parsed) ? 0 : parsed;
     };
 
-    const sorted = [...(paymentsMonth || [])].sort((a, b) => (parseTs(candidates(b)) || 0) - (parseTs(candidates(a)) || 0));
+    const paymentTagged = (paymentsMonth || []).map((p) => ({ kind: 'payment', row: p }));
+    const revenueTagged = (revenuesMonth || []).map((r) => ({ kind: 'revenue', row: r }));
 
-    return sorted.map((p, idx) => {
+    const sorted = [...paymentTagged, ...revenueTagged].sort((a, b) => {
+      const av = candidates(a.row);
+      const bv = candidates(b.row);
+      return (parseTs(bv) || 0) - (parseTs(av) || 0);
+    });
+
+    return sorted.map((it, idx) => {
+      const p = it.row || {};
+      const isManual = it.kind === 'revenue';
       const pid = String(p.MemberID || p.member_id || p.id || p.member || "").trim();
-      const member = (members || []).find((m) => {
+      const member = !isManual ? (members || []).find((m) => {
         if (!pid) return false;
         return String(m.MemberID || m.member_id || m.id || "").trim() === pid;
-      });
+      }) : null;
       const paidRaw = candidates(p);
+      const nickCell = isManual ? (p.Category || p.category || '-') : displayName(member);
+      const particulars = isManual
+        ? (p.Particulars || p.particulars || '-')
+        : (p.Particulars || p.particulars || p.type || p.item || p.category || p.product || p.paymentfor || p.plan || p.description);
       return (
         <tr key={idx}>
           <td>{display(fmtDateTime(paidRaw))}</td>
-          <td>{displayName(member)}</td>
-          <td>{display(p.Particulars || p.particulars || p.type || p.item || p.category || p.product || p.paymentfor || p.plan || p.description)}</td>
+          <td>{display(nickCell)}</td>
+          <td>{display(particulars)}</td>
           <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>{display(p.Mode || p.mode || p.method)}</td>
           <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>{display((parseFloat(p.Cost || p.amount || 0) || 0).toLocaleString())}</td>
         </tr>
       );
     });
-  }, [paymentsMonth, members]);
+  }, [paymentsMonth, revenuesMonth, members]);
+
+  const expenseRows = useMemo(() => {
+    const candidates = (e) => e.timestamp || e.created || e.createdAt || e.date || e.Date || null;
+    const parseTs = (v) => {
+      if (!v && v !== 0) return 0;
+      if (typeof v === 'number') return v;
+      try { if (v && typeof v.toMillis === 'function') return v.toMillis(); } catch (e) {}
+      try { if (v && typeof v.seconds === 'number') return v.seconds * 1000; } catch (e) {}
+      const parsed = Date.parse(String(v));
+      return isNaN(parsed) ? 0 : parsed;
+    };
+    const sorted = [...(expensesMonth || [])].sort((a, b) => (parseTs(candidates(b)) || 0) - (parseTs(candidates(a)) || 0));
+    return sorted.map((e, idx) => {
+      const dt = candidates(e) || (e.Date ? `${e.Date}T00:00:00+08:00` : null);
+      return (
+        <tr key={idx}>
+          <td>{display(fmtDateTime(dt))}</td>
+          <td>{display(e.Category || e.category)}</td>
+          <td>{display(e.Item || e.item)}</td>
+          <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{display((parseFloat(e.Amount || e.amount || 0) || 0).toLocaleString())}</td>
+        </tr>
+      );
+    });
+  }, [expensesMonth]);
+
+  const resetRevenueForm = () => {
+    setRevenueForm({ Date: manilaTodayYMD(), Category: "Grocery", Particulars: "", Mode: "Cash", Cost: "" });
+    setRevErr("");
+  };
+
+  const resetExpenseForm = () => {
+    setExpenseForm({ Date: manilaTodayYMD(), Category: "Equipment", Item: "", Cost: "" });
+    setExpErr("");
+  };
+
+  const saveRevenue = async () => {
+    try {
+      setRevErr("");
+      const date = String(revenueForm.Date || '').trim();
+      const category = String(revenueForm.Category || '').trim();
+      const particulars = String(revenueForm.Particulars || '').trim();
+      const mode = String(revenueForm.Mode || '').trim();
+      const cost = String(revenueForm.Cost || '').trim();
+      const amt = parseFloat(cost);
+      if (!date) return setRevErr('Date is required');
+      if (!category) return setRevErr('Category is required');
+      if (!particulars) return setRevErr('Particulars is required');
+      if (!mode) return setRevErr('Mode is required');
+      if (!cost || Number.isNaN(amt)) return setRevErr('Cost must be a number');
+      setRevBusy(true);
+      await addRevenue({ Date: date, Category: category, Particulars: particulars, Mode: mode, Cost: amt });
+      setOpenAddRevenue(false);
+      resetRevenueForm();
+    } catch (e) {
+      setRevErr(e?.message || 'Failed to add revenue');
+    } finally {
+      setRevBusy(false);
+    }
+  };
+
+  const saveExpense = async () => {
+    try {
+      setExpErr("");
+      const date = String(expenseForm.Date || '').trim();
+      const category = String(expenseForm.Category || '').trim();
+      const item = String(expenseForm.Item || '').trim();
+      const cost = String(expenseForm.Cost || '').trim();
+      const amt = parseFloat(cost);
+      if (!date) return setExpErr('Date is required');
+      if (!category) return setExpErr('Category is required');
+      if (!item) return setExpErr('Item is required');
+      if (!cost || Number.isNaN(amt)) return setExpErr('Cost must be a number');
+      setExpBusy(true);
+      await addExpense({ Date: date, Category: category, Item: item, Amount: amt });
+      setOpenAddExpense(false);
+      resetExpenseForm();
+    } catch (e) {
+      setExpErr(e?.message || 'Failed to add expense');
+    } finally {
+      setExpBusy(false);
+    }
+  };
 
   return (
     <div className="dashboard-content">
@@ -307,35 +493,211 @@ export default function Reports() {
 
         {/* Monthly Revenue Table moved from Dashboard */}
         <div style={{ marginTop: 24 }} className="panel">
-          <div className="panel-header">Monthly Revenue</div>
+          <div className="panel-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <span>Monthly Revenue</span>
+            <div style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}>
+              <button className="button" type="button" onClick={() => setRevCollapsed(v => !v)} style={{ background: '#eee', color: '#333' }}>
+                {revCollapsed ? 'Expand' : 'Collapse'}
+              </button>
+              <button className="button" type="button" onClick={() => { resetRevenueForm(); setOpenAddRevenue(true); }}>
+                Add Revenue
+              </button>
+            </div>
+          </div>
+
+          {!revCollapsed && (
+            <table className="aligned payments-table">
+              <colgroup>
+                <col style={{ width: "24%" }} />
+                <col style={{ width: "24%" }} />
+                <col style={{ width: "24%" }} />
+                <col style={{ width: "14%" }} />
+                <col style={{ width: "14%" }} />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Nickname</th>
+                  <th>Particulars</th>
+                  <th style={{ textAlign: "center" }}>Mode</th>
+                  <th style={{ textAlign: "right" }}>Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(!monthlyRows || (Array.isArray(monthlyRows) && monthlyRows.length === 0)) ? (
+                  <tr>
+                    <td colSpan={5}>-</td>
+                  </tr>
+                ) : (
+                  monthlyRows
+                )}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Expenses section */}
+        <div style={{ marginTop: 24 }} className="panel">
+          <div className="panel-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <span>Expenses</span>
+            <button className="button" type="button" onClick={() => { resetExpenseForm(); setOpenAddExpense(true); }}>
+              Add Expense
+            </button>
+          </div>
           <table className="aligned payments-table">
             <colgroup>
-              <col style={{ width: "24%" }} />
-              <col style={{ width: "24%" }} />
-              <col style={{ width: "24%" }} />
-              <col style={{ width: "14%" }} />
-              <col style={{ width: "14%" }} />
+              <col style={{ width: '28%' }} />
+              <col style={{ width: '24%' }} />
+              <col style={{ width: '28%' }} />
+              <col style={{ width: '20%' }} />
             </colgroup>
             <thead>
               <tr>
                 <th>Date</th>
-                <th>Nickname</th>
-                <th>Particulars</th>
-                <th style={{ textAlign: "center" }}>Mode</th>
-                <th style={{ textAlign: "right" }}>Cost</th>
+                <th>Category</th>
+                <th>Item</th>
+                <th style={{ textAlign: 'right' }}>Cost</th>
               </tr>
             </thead>
             <tbody>
-              {(!monthlyRows || (Array.isArray(monthlyRows) && monthlyRows.length === 0)) ? (
-                <tr>
-                  <td colSpan={5}>-</td>
-                </tr>
+              {(!expenseRows || (Array.isArray(expenseRows) && expenseRows.length === 0)) ? (
+                <tr><td colSpan={4}>-</td></tr>
               ) : (
-                monthlyRows
+                expenseRows
               )}
             </tbody>
           </table>
         </div>
+
+        <ModalWrapper
+          open={openAddRevenue}
+          onClose={() => { setOpenAddRevenue(false); }}
+          title="Add Revenue"
+        >
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <div>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Date</div>
+              <input
+                value={revenueForm.Date}
+                onChange={(e) => setRevenueForm((p) => ({ ...p, Date: e.target.value }))}
+                type="date"
+                style={{ width: '100%', height: 44, padding: '10px 12px', border: '1px solid #e7e8ef', borderRadius: 10, fontSize: 16 }}
+              />
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Category</div>
+              <select
+                value={revenueForm.Category}
+                onChange={(e) => setRevenueForm((p) => ({ ...p, Category: e.target.value }))}
+                style={{ width: '100%', height: 44, padding: '10px 12px', border: '1px solid #e7e8ef', borderRadius: 10, fontSize: 16 }}
+              >
+                <option value="Grocery">Grocery</option>
+                <option value="Others">Others</option>
+              </select>
+            </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Particulars</div>
+              <input
+                value={revenueForm.Particulars}
+                onChange={(e) => setRevenueForm((p) => ({ ...p, Particulars: e.target.value }))}
+                placeholder="Particulars"
+                style={{ width: '100%', height: 44, padding: '10px 12px', border: '1px solid #e7e8ef', borderRadius: 10, fontSize: 16 }}
+              />
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Mode</div>
+              <select
+                value={revenueForm.Mode}
+                onChange={(e) => setRevenueForm((p) => ({ ...p, Mode: e.target.value }))}
+                style={{ width: '100%', height: 44, padding: '10px 12px', border: '1px solid #e7e8ef', borderRadius: 10, fontSize: 16 }}
+              >
+                <option value="Cash">Cash</option>
+                <option value="GCash">GCash</option>
+              </select>
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Cost</div>
+              <input
+                value={revenueForm.Cost}
+                onChange={(e) => setRevenueForm((p) => ({ ...p, Cost: e.target.value }))}
+                inputMode="decimal"
+                placeholder="0"
+                style={{ width: '100%', height: 44, padding: '10px 12px', border: '1px solid #e7e8ef', borderRadius: 10, fontSize: 16 }}
+              />
+            </div>
+          </div>
+          {revErr && <div style={{ marginTop: 12, color: 'crimson', fontWeight: 700 }}>{revErr}</div>}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
+            <button className="button" type="button" onClick={() => { setOpenAddRevenue(false); }} style={{ background: '#eee', color: '#333' }}>
+              Cancel
+            </button>
+            <button className="button" type="button" disabled={revBusy} onClick={saveRevenue}>
+              {revBusy ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </ModalWrapper>
+
+        <ModalWrapper
+          open={openAddExpense}
+          onClose={() => { setOpenAddExpense(false); }}
+          title="Add Expense"
+        >
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <div>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Date</div>
+              <input
+                value={expenseForm.Date}
+                onChange={(e) => setExpenseForm((p) => ({ ...p, Date: e.target.value }))}
+                type="date"
+                style={{ width: '100%', height: 44, padding: '10px 12px', border: '1px solid #e7e8ef', borderRadius: 10, fontSize: 16 }}
+              />
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Category</div>
+              <select
+                value={expenseForm.Category}
+                onChange={(e) => setExpenseForm((p) => ({ ...p, Category: e.target.value }))}
+                style={{ width: '100%', height: 44, padding: '10px 12px', border: '1px solid #e7e8ef', borderRadius: 10, fontSize: 16 }}
+              >
+                <option value="Equipment">Equipment</option>
+                <option value="Grocery">Grocery</option>
+                <option value="Rent">Rent</option>
+                <option value="Utilities">Utilities</option>
+                <option value="Salary">Salary</option>
+                <option value="Others">Others</option>
+              </select>
+            </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Item</div>
+              <input
+                value={expenseForm.Item}
+                onChange={(e) => setExpenseForm((p) => ({ ...p, Item: e.target.value }))}
+                placeholder="Item"
+                style={{ width: '100%', height: 44, padding: '10px 12px', border: '1px solid #e7e8ef', borderRadius: 10, fontSize: 16 }}
+              />
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Cost</div>
+              <input
+                value={expenseForm.Cost}
+                onChange={(e) => setExpenseForm((p) => ({ ...p, Cost: e.target.value }))}
+                inputMode="decimal"
+                placeholder="0"
+                style={{ width: '100%', height: 44, padding: '10px 12px', border: '1px solid #e7e8ef', borderRadius: 10, fontSize: 16 }}
+              />
+            </div>
+            <div />
+          </div>
+          {expErr && <div style={{ marginTop: 12, color: 'crimson', fontWeight: 700 }}>{expErr}</div>}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
+            <button className="button" type="button" onClick={() => { setOpenAddExpense(false); }} style={{ background: '#eee', color: '#333' }}>
+              Cancel
+            </button>
+            <button className="button" type="button" disabled={expBusy} onClick={saveExpense}>
+              {expBusy ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </ModalWrapper>
       </div>
     </div>
   );
