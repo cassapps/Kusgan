@@ -130,24 +130,78 @@ export async function fetchMemberByIdFresh(memberId) { return fetchMemberById(me
 
 export async function fetchMemberBundle(memberId) {
   if (!memberId) throw new Error('memberId required');
-  const [members, payments, gymEntries, progress] = await Promise.all([
-    fetchMembers(),
-    fb.getCollection(COLS.payments),
-    fb.getCollection(COLS.gymEntries),
-    fb.getCollection(COLS.progress),
-  ]);
+
   const id = String(memberId).trim();
-  const memberRow = (members.rows || []).find(r => String(r.MemberID || r.memberId || r.id || r.memberid || '').trim() === id) || null;
-  const canonical = canonicalizeMember(memberRow);
-  const paymentsFor = (payments || []).filter(p => String(p.MemberID || p.memberId || p.id || p.memberid || '').trim() === id);
-  const gymFor = (gymEntries || []).filter(g => String(g.MemberID || g.memberId || g.id || g.memberid || '').trim() === id);
-  const progFor = (progress || []).filter(p => String(p.MemberID || p.memberId || p.id || p.memberid || '').trim() === id);
-  return { member: memberRow, payments: paymentsFor, gymEntries: gymFor, progress: progFor };
+
+  // Member doc: prefer doc id = MemberID (cheapest). Fallback to query on common fields.
+  let memberRow = null;
+  try {
+    memberRow = await fb.getDocById(COLS.members, id);
+  } catch (e) { /* ignore */ }
+  if (!memberRow) {
+    const fields = ['MemberID', 'memberId', 'memberid', 'id'];
+    for (const f of fields) {
+      try {
+        const hit = await fb.queryCollection(COLS.members, { wheres: [{ field: f, op: '==', value: id }], limit: 1 });
+        if (hit && hit.length) { memberRow = hit[0]; break; }
+      } catch (e) { /* ignore */ }
+    }
+  }
+
+  const queryByMember = async (colName) => {
+    const fields = ['MemberID', 'memberId', 'memberid', 'member', 'id'];
+    const seen = new Map();
+    for (const f of fields) {
+      try {
+        const rows = await fb.queryCollection(colName, { wheres: [{ field: f, op: '==', value: id }], limit: 5000 });
+        for (const r of (rows || [])) seen.set(r.id, r);
+      } catch (e) { /* ignore */ }
+    }
+    return Array.from(seen.values());
+  };
+
+  const [paymentsFor, gymFor, progFor] = await Promise.all([
+    queryByMember(COLS.payments),
+    queryByMember(COLS.gymEntries),
+    queryByMember(COLS.progress),
+  ]);
+
+  return { member: memberRow ? ({ ...memberRow }) : null, payments: paymentsFor, gymEntries: gymFor, progress: progFor };
 }
 
 export async function fetchGymEntries() { return { rows: await fb.getCollection(COLS.gymEntries) }; }
 export async function fetchGymEntriesFresh() { return fetchGymEntries(); }
 export async function addGymEntry(row) { const r = await fb.addDocument(COLS.gymEntries, row); return { ok: true, id: r.id }; }
+
+// Date-scoped helpers to avoid reading entire collections.
+export async function fetchGymEntriesSince({ days = 30, limit = 2000 } = {}) {
+  const cutoff = new Date(Date.now() - (days * 24 * 60 * 60 * 1000));
+  const cutoffYMD = cutoff.toISOString().slice(0, 10);
+  try {
+    const rows = await fb.queryCollection(COLS.gymEntries, {
+      wheres: [{ field: 'Date', op: '>=', value: cutoffYMD }],
+      orderBy: { field: 'Date', dir: 'desc' },
+      limit,
+    });
+    return { rows };
+  } catch (e) {
+    return { rows: [] };
+  }
+}
+
+export async function fetchGymEntriesForDate(dateYMD) {
+  const ymd = String(dateYMD || '').trim();
+  if (!ymd) return { rows: [] };
+  try {
+    const rows = await fb.queryCollection(COLS.gymEntries, {
+      wheres: [{ field: 'Date', op: '==', value: ymd }],
+      limit: 2000,
+    });
+    return { rows };
+  } catch (e) {
+    return { rows: [] };
+  }
+}
 
 // Smart append helper for quick check-ins/check-outs.
 // - If called without extra.wantsOut, creates a check-in row with Date and TimeIn (ISO) if missing.
@@ -391,95 +445,136 @@ export async function addProgressRow(row) {
 // without composite indexes, so we fetch relevant collections and combine client-side. For typical dataset sizes
 // this is efficient; for very large datasets consider adding dedicated indexes or a search index.
 export async function fetchMembersRecent({ limit = 200, days = 90 } = {}) {
-  const cutoff = new Date(Date.now() - (days * 24 * 60 * 60 * 1000));
-  // Fetch the collections (members, payments, gymEntries). We intentionally fetch payments and gymEntries
-  // and then derive a set of member IDs with recent activity.
-  let membersRaw = [];
+  const cutoffMs = Date.now() - (days * 24 * 60 * 60 * 1000);
+  const cutoff = new Date(cutoffMs);
+  const cutoffYMD = cutoff.toISOString().slice(0, 10);
+
+  // Avoid full-collection scans: only look at recent gymEntries/payments, derive member IDs, then fetch only those members.
   let paymentsRaw = [];
   let entriesRaw = [];
   try {
-    [membersRaw, paymentsRaw, entriesRaw] = await Promise.all([
-      fb.getCollection(COLS.members),
-      fb.getCollection(COLS.payments),
-      fb.getCollection(COLS.gymEntries),
+    [paymentsRaw, entriesRaw] = await Promise.all([
+      fb.queryCollection(COLS.payments, { wheres: [{ field: 'Date', op: '>=', value: cutoffYMD }], orderBy: { field: 'Date', dir: 'desc' }, limit: 4000 }).catch(() => []),
+      fb.queryCollection(COLS.gymEntries, { wheres: [{ field: 'Date', op: '>=', value: cutoffYMD }], orderBy: { field: 'Date', dir: 'desc' }, limit: 4000 }).catch(() => []),
     ]);
   } catch (e) {
-    // If Firestore isn't available or query failed, we'll fallback to server-side endpoints below
-    membersRaw = paymentsRaw = entriesRaw = [];
+    paymentsRaw = entriesRaw = [];
   }
 
-  // If Firestore returned no members (or very few), fallback to the local API server which
-  // is the authoritative sqlite-backed source. This avoids missing rows when mirroring
-  // to Firestore hasn't completed.
-  if ((!membersRaw || membersRaw.length === 0) && typeof fetch === 'function') {
+  // If Firestore isn't available, fallback to server-side endpoints.
+  if ((paymentsRaw.length === 0 && entriesRaw.length === 0) && typeof fetch === 'function') {
     try {
       const [mResp, pResp, gResp] = await Promise.all([
         fetch('/api/members'),
         fetch('/api/payments'),
         fetch('/api/gymEntries')
       ]);
-      if (mResp && mResp.ok) membersRaw = await mResp.json();
-      if (pResp && pResp.ok) paymentsRaw = await pResp.json();
-      if (gResp && gResp.ok) entriesRaw = await gResp.json();
+      const membersRaw = (mResp && mResp.ok) ? await mResp.json() : [];
+      paymentsRaw = (pResp && pResp.ok) ? await pResp.json() : [];
+      entriesRaw = (gResp && gResp.ok) ? await gResp.json() : [];
+
+      // Old behavior (server): filter members client-side.
+      const parseDate = (v) => {
+        if (!v) return null;
+        const d = (v instanceof Date) ? v : new Date(v);
+        return isNaN(d) ? null : d;
+      };
+      const members = (membersRaw || []).map(m => ({ ...m }));
+      const recentIds = new Set();
+      for (const m of members) {
+        const d = parseDate(
+          m.memberDate || m.member_date || m.member_since || m.membersince || m.MemberSince || m.MemberDate || m.memberSince || m.createdAt || m.created_at || m.joined || m.start_date
+        );
+        if (d && d.getTime() >= cutoffMs) recentIds.add(String(m.memberId || m.MemberID || m.id || m.memberid || m.member || '').trim());
+      }
+      for (const p of (paymentsRaw || [])) {
+        const d = parseDate(p.date || p.Date || p.createdAt || p.created_at || p.timestamp);
+        if (d && d.getTime() >= cutoffMs) {
+          const mid = String(p.MemberID || p.memberId || p.memberid || p.id || '').trim();
+          if (mid) recentIds.add(mid);
+        }
+      }
+      for (const e of (entriesRaw || [])) {
+        const d = parseDate(e.Date || e.date || e.DateTime || e.timestamp || e.timeIn || e.TimeIn);
+        if (d && d.getTime() >= cutoffMs) {
+          const mid = String(e.MemberID || e.memberId || e.memberid || e.id || '').trim();
+          if (mid) recentIds.add(mid);
+        }
+      }
+      const out = (recentIds.size > 0)
+        ? members.filter(m => recentIds.has(String(m.memberId || m.MemberID || m.id || m.memberid || '').trim()))
+        : members;
+      return { rows: out.slice(0, Math.max(0, Number(limit) || 200)) };
     } catch (e) {
-      // ignore fallback errors and continue with whatever we have
+      // ignore fallback errors
     }
   }
 
-  const members = (membersRaw || []).map(m => ({ ...m }));
-
   const recentIds = new Set();
-
   const parseDate = (v) => {
     if (!v) return null;
     const d = (v instanceof Date) ? v : new Date(v);
     return isNaN(d) ? null : d;
   };
 
-  // members with recent memberDate / createdAt / member_since (support many casing variants)
-  for (const m of members) {
-    const d = parseDate(
-      m.memberDate || m.member_date || m.member_since || m.membersince || m.MemberSince || m.MemberSince || m.MemberDate || m.memberSince || m.createdAt || m.created_at || m.joined || m.start_date
-    );
-    if (d && d >= cutoff) recentIds.add(String(m.memberId || m.MemberID || m.memberId || m.id || m.memberid || m.member || "").trim());
-  }
-
-  // payments within cutoff -> add their MemberID
   for (const p of (paymentsRaw || [])) {
     const d = parseDate(p.date || p.Date || p.createdAt || p.created_at || p.timestamp);
-    if (d && d >= cutoff) {
+    if (d && d.getTime() >= cutoffMs) {
       const mid = String(p.MemberID || p.memberId || p.memberid || p.id || '').trim();
       if (mid) recentIds.add(mid);
     }
   }
-
-  // gym entries within cutoff -> add MemberID
   for (const e of (entriesRaw || [])) {
     const d = parseDate(e.Date || e.date || e.DateTime || e.timestamp || e.timeIn || e.TimeIn);
-    if (d && d >= cutoff) {
+    if (d && d.getTime() >= cutoffMs) {
       const mid = String(e.MemberID || e.memberId || e.memberid || e.id || '').trim();
       if (mid) recentIds.add(mid);
     }
   }
 
-  // If we found recent IDs, filter members by those IDs and return them sorted by join date desc and limited.
-  let out = [];
-  if (recentIds.size > 0) {
-    out = members.filter(m => recentIds.has(String(m.memberId || m.MemberID || m.id || m.memberid || '').trim()));
-  } else {
-    // fallback: return newest members by createdAt / memberDate
-    out = [...members].sort((a, b) => {
-      const da = parseDate(a.memberDate || a.createdAt || a.joined);
-      const db = parseDate(b.memberDate || b.createdAt || b.joined);
-      if (!da && !db) return 0;
-      if (!da) return 1;
-      if (!db) return -1;
-      return db - da;
-    });
+  // If we couldn't derive any IDs, fall back to a bounded members query.
+  if (recentIds.size === 0) {
+    try {
+      const ms = await fb.queryCollection(COLS.members, { orderBy: { field: 'createdAt', dir: 'desc' }, limit: Math.max(limit, 200) });
+      return { rows: (ms || []).slice(0, Math.max(0, Number(limit) || 200)).map(r => ({ ...r })) };
+    } catch (e) {
+      try {
+        const ms = await fb.queryCollection(COLS.members, { limit: Math.max(limit, 200) });
+        return { rows: (ms || []).slice(0, Math.max(0, Number(limit) || 200)).map(r => ({ ...r })) };
+      } catch (e2) {
+        return { rows: [] };
+      }
+    }
   }
 
-  // Limit the result set
-  return { rows: out.slice(0, Math.max(0, Number(limit) || 200)) };
+  // Fetch only those members in batches (Firestore 'in' supports max 10 values).
+  const ids = Array.from(recentIds);
+  const out = [];
+  const seen = new Set();
+  const max = Math.max(0, Number(limit) || 200);
+  for (let i = 0; i < ids.length && out.length < max; i += 10) {
+    const batch = ids.slice(i, i + 10);
+
+    // Prefer doc id match.
+    try {
+      const rows = await fb.queryCollection(COLS.members, { wheres: [{ field: '__name__', op: 'in', value: batch }], limit: 10 });
+      for (const r of (rows || [])) {
+        if (!seen.has(r.id)) { seen.add(r.id); out.push({ ...r }); }
+      }
+    } catch (e) { /* ignore */ }
+
+    // Fallback: match on MemberID field.
+    if (out.length < max) {
+      try {
+        const rows = await fb.queryCollection(COLS.members, { wheres: [{ field: 'MemberID', op: 'in', value: batch }], limit: 10 });
+        for (const r of (rows || [])) {
+          if (!seen.has(r.id)) { seen.add(r.id); out.push({ ...r }); }
+        }
+      } catch (e) { /* ignore */ }
+    }
+  }
+
+  return { rows: out.slice(0, max) };
 }
 
 // Simple search across member name fields. Firestore lacks rich text search in the client SDK,
@@ -562,6 +657,92 @@ export async function insertRow(sheetName, row) {
 export async function fetchPayments() { return { rows: await fb.getCollection(COLS.payments) }; }
 export async function addPayment(payload) { const r = await fb.addDocument(COLS.payments, payload); return { ok: true, id: r.id }; }
 
+export async function fetchPaymentsSince({ days = 30, limit = 2000 } = {}) {
+  const cutoff = new Date(Date.now() - (days * 24 * 60 * 60 * 1000));
+  const cutoffYMD = cutoff.toISOString().slice(0, 10);
+  try {
+    const rows = await fb.queryCollection(COLS.payments, {
+      wheres: [{ field: 'Date', op: '>=', value: cutoffYMD }],
+      orderBy: { field: 'Date', dir: 'desc' },
+      limit,
+    });
+    return { rows };
+  } catch (e) {
+    return { rows: [] };
+  }
+}
+
+export async function fetchPaymentsForDate(dateYMD) {
+  const ymd = String(dateYMD || '').trim();
+  if (!ymd) return { rows: [] };
+  try {
+    const rows = await fb.queryCollection(COLS.payments, {
+      wheres: [{ field: 'Date', op: '==', value: ymd }],
+      limit: 2000,
+    });
+    return { rows };
+  } catch (e) {
+    return { rows: [] };
+  }
+}
+
+export async function fetchPaymentsForMonth(monthKey, { limit = 8000 } = {}) {
+  const mk = String(monthKey || '').trim();
+  if (!mk || !/^\d{4}-\d{2}$/.test(mk)) return { rows: [] };
+  const start = `${mk}-01`;
+  const end = `${mk}-31`;
+  try {
+    const rows = await fb.queryCollection(COLS.payments, {
+      wheres: [
+        { field: 'Date', op: '>=', value: start },
+        { field: 'Date', op: '<=', value: end },
+      ],
+      orderBy: { field: 'Date', dir: 'desc' },
+      limit,
+    });
+    return { rows };
+  } catch (e) {
+    return { rows: [] };
+  }
+}
+
+// Realtime listeners so UI only updates when docs change.
+export function listenMembers(onRows, onError) {
+  return fb.listenCollection(COLS.members, onRows, onError);
+}
+
+export function listenGymEntriesForDate(dateYMD, onRows, onError) {
+  const ymd = String(dateYMD || '').trim();
+  if (!ymd) return () => {};
+  return fb.listenQueryCollection(COLS.gymEntries, { wheres: [{ field: 'Date', op: '==', value: ymd }], limit: 2000 }, onRows, onError);
+}
+
+export function listenPaymentsForDate(dateYMD, onRows, onError) {
+  const ymd = String(dateYMD || '').trim();
+  if (!ymd) return () => {};
+  return fb.listenQueryCollection(COLS.payments, { wheres: [{ field: 'Date', op: '==', value: ymd }], limit: 2000 }, onRows, onError);
+}
+
+export function listenPaymentsForMonth(monthKey, onRows, onError) {
+  const mk = String(monthKey || '').trim();
+  if (!mk || !/^\d{4}-\d{2}$/.test(mk)) return () => {};
+  const start = `${mk}-01`;
+  const end = `${mk}-31`;
+  return fb.listenQueryCollection(
+    COLS.payments,
+    {
+      wheres: [
+        { field: 'Date', op: '>=', value: start },
+        { field: 'Date', op: '<=', value: end },
+      ],
+      orderBy: { field: 'Date', dir: 'desc' },
+      limit: 8000,
+    },
+    onRows,
+    onError
+  );
+}
+
 // Upload photo helpers (client). Uses Firebase Storage via fb.uploadFile
 export async function uploadMemberPhoto(fileOrArgs, baseId) {
   // Accept file Blob/File or object { memberId, filename, mime, data }
@@ -640,9 +821,40 @@ export async function updatePricing(id, patch) {
 
 // Attendance: store as docs in attendance collection. Provide basic clockIn/clockOut helpers.
 export async function fetchAttendance(dateYMD) {
+  if (dateYMD) {
+    const ymd = String(dateYMD || '').trim();
+    try {
+      const rows = await fb.queryCollection(COLS.attendance, { wheres: [{ field: 'Date', op: '==', value: ymd }], limit: 2000 });
+      return { rows };
+    } catch (e) {
+      // fallback to full scan
+    }
+  }
   const rows = await fb.getCollection(COLS.attendance);
   if (!dateYMD) return { rows };
   return { rows: rows.filter(r => String(r.Date || '').startsWith(String(dateYMD))) };
+}
+
+export async function fetchAttendanceSince({ days = 30, limit = 2000 } = {}) {
+  const cutoff = new Date(Date.now() - (days * 24 * 60 * 60 * 1000));
+  const cutoffYMD = cutoff.toISOString().slice(0, 10);
+  try {
+    const rows = await fb.queryCollection(COLS.attendance, {
+      wheres: [{ field: 'Date', op: '>=', value: cutoffYMD }],
+      orderBy: { field: 'Date', dir: 'desc' },
+      limit,
+    });
+    return { rows };
+  } catch (e) {
+    // fallback to full scan and client filter
+    try {
+      const rows = await fb.getCollection(COLS.attendance);
+      const filtered = (rows || []).filter(r => String(r.Date || '').slice(0,10) >= cutoffYMD);
+      return { rows: filtered.slice(0, limit) };
+    } catch (e2) {
+      return { rows: [] };
+    }
+  }
 }
 
 export async function clockIn(staff) {
@@ -674,12 +886,15 @@ export async function fetchDashboard() { return { rows: [] }; }
 
 const api = {
   fetchMembers, fetchMembersFresh, addMember, saveMember, updateMember, fetchMemberById, fetchMemberByIdFresh, fetchMemberBundle,
-  fetchAttendance, clockIn, clockOut,
+  fetchAttendance, fetchAttendanceSince, clockIn, clockOut,
   fetchGymEntries, fetchGymEntriesFresh, addGymEntry, gymQuickAppend,
   fetchProgressTracker, addProgressRow,
   fetchPricing, fetchPayments, addPayment, fetchDashboard,
   // new helpers
   fetchMembersRecent, searchMembersByName,
+  fetchGymEntriesSince, fetchGymEntriesForDate,
+  fetchPaymentsSince, fetchPaymentsForDate, fetchPaymentsForMonth,
+  listenMembers, listenGymEntriesForDate, listenPaymentsForDate, listenPaymentsForMonth,
   addPricing, updatePricing, uploadPhoto,
 };
 

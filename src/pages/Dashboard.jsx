@@ -1,7 +1,19 @@
 
 import { useEffect, useState, useMemo } from "react";
 import api from "../api";
-const { fetchMembers, fetchPayments, fetchGymEntries, fetchGymEntriesFresh, fetchPricing, fetchDashboard, gymQuickAppend } = api;
+const {
+  fetchMembers,
+  fetchPayments,
+  fetchGymEntries,
+  fetchGymEntriesFresh,
+  fetchPricing,
+  fetchDashboard,
+  gymQuickAppend,
+  listenMembers,
+  listenGymEntriesForDate,
+  listenPaymentsForDate,
+  listenPaymentsForMonth,
+} = api;
 import { useNavigate } from "react-router-dom";
 import { fmtTime, fmtDate, display } from "./MemberDetail.jsx";
 import { isTimeOutMissingRow, firstOf as firstOfVisit } from '../lib/visitUtils';
@@ -23,6 +35,7 @@ const firstOf = (o, ks) => firstOfVisit(o, ks);
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const useFirestore = String(import.meta.env.VITE_USE_FIRESTORE ?? 'true') === 'true';
   // state/hooks
   const [stats, setStats] = useState({
     totalMembers: 0,
@@ -38,6 +51,8 @@ export default function Dashboard() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [members, setMembers] = useState([]);
   const [payments, setPayments] = useState([]);
+  const [paymentsToday, setPaymentsToday] = useState([]);
+  const [paymentsMonth, setPaymentsMonth] = useState([]);
   const [gymEntries, setGymEntries] = useState([]);
   const [pricing, setPricing] = useState([]);
   const [showAllGym, setShowAllGym] = useState(false);
@@ -145,19 +160,40 @@ export default function Dashboard() {
     try {
       const outGym = [];
       const outCoach = [];
+      const pick = (o, keys) => {
+        for (const k of keys) {
+          if (o && Object.prototype.hasOwnProperty.call(o, k)) return o[k];
+          const alt = Object.keys(o || {}).find((kk) => kk.toLowerCase().replace(/\s+/g, "") === k.toLowerCase().replace(/\s+/g, ""));
+          if (alt) return o[alt];
+        }
+        return undefined;
+      };
       for (const m of (members || [])) {
         const memberId = resolveMemberId(m);
         if (!memberId) continue;
-        const pays = paymentsByMember.get(memberId) || [];
-        const st = computeStatusForMember(pays, m, pricing || []);
-        if (st?.membershipState === 'active') outGym.push({ member: m, memberId, st });
-        if (st?.coachActive) outCoach.push({ member: m, memberId, st });
+
+        if (useFirestore) {
+          const membershipState = String(m?.membershipState || m?.membership_state || m?.status || '').trim().toLowerCase();
+          const coachState = String(m?.coachState || m?.coach_state || '').trim().toLowerCase();
+          const gymUntil = pick(m, ["membershipEnd","membership_end","gymvaliduntil","gym_valid_until","gym_until","enddate","end_date","valid_until","expiry","expires","until","end","gym_valid","gym_validity","gymvalid"]);
+          const coachUntil = pick(m, ["coachEnd","coach_end","coachvaliduntil","coach_valid_until","coach_until","coach_expiry","coach_expires"]);
+          const gymActive = (membershipState === 'active') || isDateActive(gymUntil);
+          const coachActive = (coachState === 'active') || isDateActive(coachUntil);
+          const st = { membershipState: gymActive ? 'active' : 'inactive', coachActive: !!coachActive, membershipEnd: gymUntil || null, coachEnd: coachUntil || null };
+          if (gymActive) outGym.push({ member: m, memberId, st });
+          if (coachActive) outCoach.push({ member: m, memberId, st });
+        } else {
+          const pays = paymentsByMember.get(memberId) || [];
+          const st = computeStatusForMember(pays, m, pricing || []);
+          if (st?.membershipState === 'active') outGym.push({ member: m, memberId, st });
+          if (st?.coachActive) outCoach.push({ member: m, memberId, st });
+        }
       }
       return { gym: outGym, coach: outCoach };
     } catch (e) {
       return { gym: [], coach: [] };
     }
-  }, [members, paymentsByMember, pricing]);
+  }, [useFirestore, members, paymentsByMember, pricing, isDateActive]);
 
   const openActiveList = (kind) => {
     setActiveModalKind(kind);
@@ -307,6 +343,7 @@ export default function Dashboard() {
   };
   // Generate payment rows
   const paymentRows = useMemo(() => {
+    const base = useFirestore ? (paymentsToday || []) : (payments || []);
     const today = todayYMD();
     const candidates = (p) => p.Date || p.date || p.pay_date || p.created || p.timestamp || null;
     const parseTs = (v) => {
@@ -316,7 +353,7 @@ export default function Dashboard() {
       const parsed = Date.parse(String(v));
       return isNaN(parsed) ? 0 : parsed;
     };
-    const todays = (payments || []).filter(p => {
+    const todays = (base || []).filter(p => {
       const d = candidates(p);
       const ymd = d ? new Date(d).toLocaleDateString("en-CA", { year: "numeric", month: "2-digit", day: "2-digit" }) : "";
       return ymd === today;
@@ -347,9 +384,10 @@ export default function Dashboard() {
       </tr>
     );
     });
-  }, [payments, members]);
+  }, [useFirestore, paymentsToday, payments, members]);
 
   const monthlyPayments = useMemo(() => {
+    const base = useFirestore ? (paymentsMonth || []) : (payments || []);
     const candidates = (p) => p.Date || p.date || p.pay_date || p.created || p.timestamp || null;
     const toDate = (v) => {
       try {
@@ -368,7 +406,7 @@ export default function Dashboard() {
       } catch (e) { return 0; }
     };
 
-    const filtered = (payments || []).filter(p => {
+    const filtered = (base || []).filter(p => {
       const d = toDate(candidates(p));
       if (!d || isNaN(d)) return false;
       return monthKeyForDate(d) === String(selectedMonthKey || '');
@@ -407,10 +445,62 @@ export default function Dashboard() {
     });
 
     return { total, rows };
-  }, [payments, members, selectedMonthKey]);
+  }, [useFirestore, paymentsMonth, payments, members, selectedMonthKey]);
  
 
   useEffect(() => {
+    if (useFirestore) {
+      let alive = true;
+      let unsubMembers = null;
+      let unsubGym = null;
+      let unsubPayToday = null;
+
+      setLoading(true);
+      setIsRefreshing(true);
+
+      // Pricing is small; just fetch once.
+      (async () => {
+        try {
+          const pr = await fetchPricing();
+          if (!alive) return;
+          setPricing(pr?.rows || pr?.data || []);
+        } catch (e) { /* ignore */ }
+      })();
+
+      const today = todayYMD();
+
+      try {
+        unsubMembers = listenMembers((rows) => {
+          if (!alive) return;
+          setMembers(rows || []);
+        }, () => {});
+      } catch (e) { /* ignore */ }
+
+      try {
+        unsubGym = listenGymEntriesForDate(today, (rows) => {
+          if (!alive) return;
+          setGymEntries(rows || []);
+        }, () => {});
+      } catch (e) { /* ignore */ }
+
+      try {
+        unsubPayToday = listenPaymentsForDate(today, (rows) => {
+          if (!alive) return;
+          setPaymentsToday(rows || []);
+        }, () => {});
+      } catch (e) { /* ignore */ }
+
+      setLoading(false);
+      setIsRefreshing(false);
+
+      return () => {
+        alive = false;
+        try { unsubMembers && unsubMembers(); } catch (e) {}
+        try { unsubGym && unsubGym(); } catch (e) {}
+        try { unsubPayToday && unsubPayToday(); } catch (e) {}
+      };
+    }
+
     async function loadStats() {
   setLoading(true);
   // Try server-side aggregate first for fastest dashboard render
@@ -607,17 +697,108 @@ export default function Dashboard() {
       } catch (e) { /* ignore */ }
     }, 15000);
     return () => { unsub(); unsub2(); clearInterval(pollInterval); };
-  }, []);
+  }, [useFirestore]);
+
+  // Firestore: subscribe payments for selected month so Monthly Revenue only updates on new adds/changes.
+  useEffect(() => {
+    if (!useFirestore) return;
+    let alive = true;
+    let unsub = null;
+    try {
+      unsub = listenPaymentsForMonth(selectedMonthKey, (rows) => {
+        if (!alive) return;
+        setPaymentsMonth(rows || []);
+      }, () => {});
+    } catch (e) { /* ignore */ }
+    return () => {
+      alive = false;
+      try { unsub && unsub(); } catch (e) {}
+    };
+  }, [useFirestore, selectedMonthKey]);
 
   // Recompute stats whenever key data changes so UI (checked-in count etc.) updates immediately
   useEffect(() => {
     try {
-      const computed = computeStatsFromData(members || [], payments || [], gymEntries || [], pricing || []);
-      setStats(computed);
+      if (!useFirestore) {
+        const computed = computeStatsFromData(members || [], payments || [], gymEntries || [], pricing || []);
+        setStats(computed);
+        return;
+      }
+
+      const pick = (o, keys) => {
+        for (const k of keys) {
+          if (o && Object.prototype.hasOwnProperty.call(o, k)) return o[k];
+          const alt = Object.keys(o || {}).find((kk) => kk.toLowerCase().replace(/\s+/g, "") === k.toLowerCase().replace(/\s+/g, ""));
+          if (alt) return o[alt];
+        }
+        return undefined;
+      };
+
+      // Active counts from member-level fields (avoid loading all payments)
+      let activeGym = 0;
+      let activeCoach = 0;
+      for (const m of (members || [])) {
+        const membershipState = String(m?.membershipState || m?.membership_state || m?.status || '').trim().toLowerCase();
+        const coachState = String(m?.coachState || m?.coach_state || '').trim().toLowerCase();
+        const gymUntil = pick(m, ["membershipEnd","membership_end","gymvaliduntil","gym_valid_until","gym_until","enddate","end_date","valid_until","expiry","expires","until","end","gym_valid","gym_validity","gymvalid"]);
+        const coachUntil = pick(m, ["coachEnd","coach_end","coachvaliduntil","coach_valid_until","coach_until","coach_expiry","coach_expires"]);
+        const gymActive = (membershipState === 'active') || isDateActive(gymUntil);
+        const coachActive = (coachState === 'active') || isDateActive(coachUntil);
+        if (gymActive) activeGym++;
+        if (coachActive) activeCoach++;
+      }
+
+      const visitedToday = (gymEntries || []).filter((e) => {
+        const tin = String(firstOf(e, ["TimeIn","timein","time_in"]) || '').trim();
+        return !!tin;
+      }).length;
+
+      // Coaching Sessions: unique members with a coach selected today
+      const coachedMembers = new Set();
+      for (const e of (gymEntries || [])) {
+        const coachValRaw = String(e.Coach || e.coach || '').trim();
+        const coachVal = coachValRaw.toLowerCase();
+        const memberId = String(e.MemberID || e.member_id || e.id || '').trim();
+        const coachSelected = !!coachValRaw && coachVal !== '-' && coachVal !== '—' && coachVal !== 'n/a' && coachVal !== 'na' && coachVal !== 'none';
+        if (coachSelected && memberId) coachedMembers.add(memberId);
+      }
+      const coachToday = coachedMembers.size;
+
+      // Currently checked-in: unique members with missing TimeOut
+      const checkedInSet = new Set();
+      for (const e of (gymEntries || [])) {
+        const tin = String(firstOf(e, ["TimeIn","timein","time_in"]) || '').trim();
+        const memberId = String(firstOf(e, ["MemberID","memberid","member_id","id"]) || '').trim();
+        const toutPresent = !isTimeOutMissingRow(e);
+        if (tin && !toutPresent && memberId) checkedInSet.add(memberId);
+      }
+      const checkedIn = checkedInSet.size;
+
+      // Revenue today: use today-scoped payments listener
+      let cashToday = 0, gcashToday = 0, totalPaymentsToday = 0;
+      for (const p of (paymentsToday || [])) {
+        const amt = parseFloat(p.Cost || p.amount || 0) || 0;
+        totalPaymentsToday += amt;
+        const mode = String(p.Mode || p.mode || p.method || "").toLowerCase();
+        if (mode === 'cash') cashToday += amt;
+        if (mode === 'gcash') gcashToday += amt;
+      }
+
+      setStats({
+        totalMembers: (members || []).length,
+        activeGym,
+        activeCoach,
+        visitedToday,
+        coachToday,
+        checkedIn,
+        cashToday,
+        gcashToday,
+        totalPaymentsToday,
+      });
     } catch (e) {
       console.warn('Failed to recompute stats on data change', e);
     }
-  }, [members, payments, gymEntries, pricing]);
+  }, [useFirestore, members, payments, paymentsToday, gymEntries, pricing]);
 
   // Checkout handler: attempt to close an open gym entry for the given member id.
   const handleCheckout = async (entry, payload = {}) => {
@@ -629,6 +810,10 @@ export default function Dashboard() {
       const today = todayYMD();
       // request backend to set TimeOut for today's open row for this member
       const res = await gymQuickAppend(memberId, { wantsOut: true, ...(payload || {}) });
+      if (useFirestore) {
+        // Firestore mode uses realtime listeners for today's entries; no need to poll/fetch.
+        return;
+      }
       // poll until authoritative TimeOut appears (or timeout)
       const wait = (ms) => new Promise(r => setTimeout(r, ms));
       const checkFn = (rowsArr) => {

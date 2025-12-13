@@ -1,7 +1,7 @@
 // Minimal Firebase client wrapper for browser usage (Firestore)
 // Usage: set VITE_FIREBASE_API_KEY, VITE_FIREBASE_AUTH_DOMAIN, VITE_FIREBASE_PROJECT_ID, VITE_FIREBASE_APP_ID
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, query, where, orderBy, startAt, endAt, limit as limitFn } from 'firebase/firestore';
+import { getFirestore, collection, doc, doc as docFn, getDoc, getDocs, setDoc, addDoc, updateDoc, query, where, orderBy, startAt, endAt, limit as limitFn, onSnapshot, documentId } from 'firebase/firestore';
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 const clientConfig = {
@@ -59,10 +59,19 @@ export async function queryCollection(name, opts = {}) {
   const constraints = [];
   if (Array.isArray(opts.wheres)) {
     for (const w of opts.wheres) {
-      constraints.push(where(w.field, w.op || '==', w.value));
+      if (w.field === '__name__' || w.field === 'documentId') {
+        constraints.push(where(documentId(), w.op || '==', w.value));
+      } else {
+        constraints.push(where(w.field, w.op || '==', w.value));
+      }
     }
   } else if (opts.where) {
-    constraints.push(where(opts.where.field, opts.where.op || '==', opts.where.value));
+    const w = opts.where;
+    if (w.field === '__name__' || w.field === 'documentId') {
+      constraints.push(where(documentId(), w.op || '==', w.value));
+    } else {
+      constraints.push(where(w.field, w.op || '==', w.value));
+    }
   }
   if (opts.orderBy) {
     constraints.push(orderBy(opts.orderBy.field, opts.orderBy.dir || 'asc'));
@@ -79,6 +88,61 @@ export async function queryCollection(name, opts = {}) {
   const qref = constraints.length ? query(col, ...constraints) : query(col);
   const snap = await getDocs(qref);
   return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+}
+
+// Realtime listener variant of queryCollection.
+// callback receives the array of docs ({id, ...data}). Returns unsubscribe.
+export function listenQueryCollection(name, opts = {}, callback, onError) {
+  const col = colRef(name);
+  const constraints = [];
+  if (Array.isArray(opts.wheres)) {
+    for (const w of opts.wheres) {
+      if (w.field === '__name__' || w.field === 'documentId') {
+        constraints.push(where(documentId(), w.op || '==', w.value));
+      } else {
+        constraints.push(where(w.field, w.op || '==', w.value));
+      }
+    }
+  } else if (opts.where) {
+    const w = opts.where;
+    if (w.field === '__name__' || w.field === 'documentId') {
+      constraints.push(where(documentId(), w.op || '==', w.value));
+    } else {
+      constraints.push(where(w.field, w.op || '==', w.value));
+    }
+  }
+  if (opts.orderBy) {
+    constraints.push(orderBy(opts.orderBy.field, opts.orderBy.dir || 'asc'));
+  }
+  if (opts.startAt !== undefined) {
+    constraints.push(startAt(opts.startAt));
+  }
+  if (opts.endAt !== undefined) {
+    constraints.push(endAt(opts.endAt));
+  }
+  if (opts.limit) {
+    constraints.push(limitFn(Number(opts.limit)));
+  }
+  const qref = constraints.length ? query(col, ...constraints) : query(col);
+  const unsub = onSnapshot(
+    qref,
+    (snap) => {
+      try {
+        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        callback && callback(rows);
+      } catch (e) {
+        onError && onError(e);
+      }
+    },
+    (err) => {
+      onError && onError(err);
+    }
+  );
+  return unsub;
+}
+
+export function listenCollection(name, callback, onError) {
+  return listenQueryCollection(name, {}, callback, onError);
 }
 
 export function getStorageInstance() {
@@ -137,6 +201,8 @@ export default {
   docRef,
   getCollection,
   queryCollection,
+  listenQueryCollection,
+  listenCollection,
   getDocById,
   addDocument,
   setDocument,

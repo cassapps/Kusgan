@@ -5,7 +5,7 @@ import LoadingSkeleton from "../components/LoadingSkeleton";
 import events from "../lib/events";
 import CheckInConfirmModal from "../components/CheckInConfirmModal";
 import api from "../api";
-const { fetchMemberBundle, fetchPricing, fetchMembers, fetchPayments, fetchGymEntries, gymClockIn, gymClockOut, gymQuickAppend } = api;
+const { fetchMemberBundle, fetchPricing, fetchMembers, fetchGymEntriesForDate, gymClockIn, gymClockOut, gymQuickAppend } = api;
 import { computeStatusForMember } from '../lib/membership';
 
 // Helper copied to keep page self-contained
@@ -89,39 +89,46 @@ export default function CheckIn(){
     let alive = true;
     (async () => {
       try {
-        // Fetch all members, payments, and pricing
-        const [memRes, payRes, priceRes] = await Promise.all([
+        // Fetch members + pricing; avoid loading full payments on this page.
+        const [memRes, priceRes] = await Promise.all([
           fetchMembers(),
-          fetchPayments(),
           fetchPricing(),
         ]);
         if (!alive) return;
         const members = (memRes?.rows || memRes?.data || []).slice();
-        const payments = payRes?.rows || payRes?.data || [];
         const pricing = priceRes?.rows || priceRes?.data || [];
-        // Also fetch recent gym entries so we can detect open visits for today
-        const gymRes = await fetchGymEntries();
+        // Only fetch today's gym entries so we can detect open visits
+        const todayYMD = new Intl.DateTimeFormat('en-CA', { timeZone: MANILA_TZ, year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date());
+        const gymRes = await fetchGymEntriesForDate(todayYMD);
         const gymEntries = (gymRes?.rows || gymRes?.data || []);
+
+        const pick = (o, keys) => {
+          for (const k of keys) {
+            if (o && Object.prototype.hasOwnProperty.call(o, k)) return o[k];
+            const alt = Object.keys(o || {}).find((kk) => kk.toLowerCase().replace(/\s+/g, "") === k.toLowerCase().replace(/\s+/g, ""));
+            if (alt) return o[alt];
+          }
+          return undefined;
+        };
 
         // Only include members who are allowed to check in:
         // - membership active (valid until today counts)
         // - AND no open gym entry for today (no entry with missing TimeOut)
-        const todayYMD = new Intl.DateTimeFormat('en-CA', { timeZone: MANILA_TZ, year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date());
         const filtered = members.filter(m => {
           const id = (m.MemberID || m.member_id || m.id || '').toString().trim();
-          const pay = payments.filter(p => String(p.MemberID||p.member_id||p.id||"" ).trim() === String(id).trim());
-          const status = computeStatusForMember(pay, id, pricing);
-          const active = status.membershipState === "active" || isDateActive(status?.membershipEnd);
+          // Prefer member-level validity fields (avoid loading payment history)
+          const membershipState = String(m.membershipState || m.membership_state || m.status || '').trim().toLowerCase();
+          const membershipEnd = pick(m, ["membershipEnd","membership_end","gymvaliduntil","gym_valid_until","gym_until","enddate","end_date","valid_until","expiry","expires","until","end"]);
+          // If member docs don't have validity fields, fall back to pricing-only best-effort (will likely mark inactive)
+          const active = (membershipState === 'active') || isDateActive(membershipEnd);
           if (!active) return false;
           // find gym entries for this member today
           const todays = gymEntries.filter(g => {
             try {
               const mid = String(g.MemberID || g.memberId || g.memberid || g.id || '').trim();
               if (!mid || String(mid) !== String(id)) return false;
-              const d = g.Date || g.date || g.DateTime || g.timestamp || g.checkin;
-              if (!d) return false;
-              const s = new Intl.DateTimeFormat('en-CA', { timeZone: MANILA_TZ, year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date(d));
-              return s === todayYMD;
+              const d = String(g.Date || g.date || '').trim();
+              return d ? d.slice(0,10) === todayYMD : false;
             } catch (e) { return false; }
           });
           // If any today's entry has missing TimeOut (open), disallow check-in

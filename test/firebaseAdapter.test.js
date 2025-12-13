@@ -28,10 +28,34 @@ describe('firebase adapter helpers', () => {
     const payments = [ { MemberID: 'B', date: new Date().toISOString() } ];
     const entries = [ { MemberID: 'A', Date: new Date().toISOString() } ];
 
-    fb.getCollection.mockImplementation(async (col) => {
-      if (col === 'members') return members;
+    // fetchMembersRecent now relies on queryCollection for scoped reads + batched member lookups.
+    fb.queryCollection.mockImplementation(async (col, opts = {}) => {
       if (col === 'payments') return payments;
       if (col === 'gymEntries') return entries;
+
+      if (col === 'members') {
+        const wheres = Array.isArray(opts.wheres) ? opts.wheres : [];
+        const inWhere = wheres.find(w => w && w.op === 'in' && Array.isArray(w.value));
+        if (inWhere) {
+          // Support both doc-id and MemberID batched queries.
+          if (inWhere.field === '__name__') {
+            return members.filter(m => inWhere.value.includes(m.id));
+          }
+          if (inWhere.field === 'MemberID') {
+            return members.filter(m => inWhere.value.includes(m.memberId));
+          }
+        }
+
+        // Fallback bounded members query.
+        return members;
+      }
+
+      return [];
+    });
+
+    // Keep getCollection mock for any fallback paths.
+    fb.getCollection.mockImplementation(async (col) => {
+      if (col === 'members') return members;
       return [];
     });
 

@@ -107,7 +107,7 @@ export default function StaffAttendance() {
       if (cached && cached.length) setRows(cached);
 
       // then fetch fresh server state and update cache
-      const ares = await api.fetchAttendance();
+      const ares = useFirestore ? await api.fetchAttendanceSince({ days: 30, limit: 2000 }) : await api.fetchAttendance();
       const json = (ares && (ares.rows || ares.data)) ? (ares.rows || ares.data) : (Array.isArray(ares) ? ares : []);
       const serverRows = Array.isArray(json) ? json : [];
       setRows(serverRows);
@@ -120,7 +120,7 @@ export default function StaffAttendance() {
       } catch (e) { /* ignore */ }
       // also load recent gym entries for coaching sessions panel (use shared API helper)
       try {
-        const gres = await api.fetchGymEntries();
+        const gres = useFirestore ? await api.fetchGymEntriesSince({ days: 180, limit: 6000 }) : await api.fetchGymEntries();
         const gj = (gres && (gres.rows || gres.data)) ? (gres.rows || gres.data) : (Array.isArray(gres) ? gres : []);
         setGymVisits(Array.isArray(gj) ? gj : []);
       } catch (e) { /* ignore */ }

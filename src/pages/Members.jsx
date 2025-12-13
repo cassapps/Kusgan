@@ -166,6 +166,31 @@ function buildPaymentIndex(paymentsRaw) {
   return idx;
 }
 
+// Member-level fallback: build status index without loading payments
+function buildMemberStatusIndex(membersRaw) {
+  const pick = (o, keys) => {
+    for (const k of keys) {
+      if (o && Object.prototype.hasOwnProperty.call(o, k)) return o[k];
+      const alt = Object.keys(o || {}).find((kk) => kk.toLowerCase().replace(/\s+/g, "") === k.toLowerCase().replace(/\s+/g, ""));
+      if (alt) return o[alt];
+    }
+    return undefined;
+  };
+
+  const idx = new Map();
+  for (const raw of (membersRaw || [])) {
+    const m = normRow(raw);
+    const memberId = firstOf(m, ["memberid","member_id","id","member_id_"]);
+    if (!memberId) continue;
+    const membershipEnd = pick(m, ["membershipEnd","membership_end","gymvaliduntil","gym_valid_until","gym_until","enddate","end_date","valid_until","expiry","expires","until","end"]);
+    const coachEnd = pick(m, ["coachEnd","coach_end","coachvaliduntil","coach_valid_until","coach_until","coach_expiry","coach_expires"]);
+    const membershipState = String(m.membershipState || m.membership_state || m.status || '').trim().toLowerCase() || null;
+    const coachActive = isDateActive(coachEnd);
+    idx.set(memberId, { membershipEnd: membershipEnd || null, coachEnd: coachEnd || null, membershipState, coachActive });
+  }
+  return idx;
+}
+
 // Gym entries: latest Date per member
 function buildLastVisitIndex(entriesRaw) {
   const idx = new Map(); // MemberID -> Date
@@ -183,6 +208,7 @@ function buildLastVisitIndex(entriesRaw) {
 
 export default function Members() {
   const navigate = useNavigate();
+  const useFirestore = String(import.meta.env.VITE_USE_FIRESTORE ?? 'true') === 'true';
   // no client-side "load more" pagination — we fetch a recent set from the server and support server-backed search
   const [membersLimit] = useState(Number.POSITIVE_INFINITY);
   const [rows, setRows] = useState([]);
@@ -219,12 +245,13 @@ export default function Members() {
   const membersFetcher = async () => {
     // Show members created/visited/purchased in the last 5 days for the "All Members" view
     const recentDays = 5;
-    const [mRes, pRes, gRes] = await Promise.all([
-      api.fetchMembersRecent({ days: recentDays }), api.fetchPayments(), api.fetchGymEntries()
+    const [mRes, gRes] = await Promise.all([
+      api.fetchMembersRecent({ days: recentDays }),
+      api.fetchGymEntriesSince({ days: 60, limit: 3000 }),
     ]);
     return {
       members: (mRes?.rows ?? mRes?.data ?? []).map(normRow),
-      payments: (pRes?.rows ?? pRes?.data ?? []),
+      payments: [],
       gymEntries: (gRes?.rows ?? gRes?.data ?? [])
     };
   };
@@ -233,7 +260,7 @@ export default function Members() {
     'members:recent',
     membersFetcher,
     {
-      revalidateOnFocus: true,
+      revalidateOnFocus: useFirestore ? false : true,
       dedupingInterval: 2000,
       fallbackData: MEMBERS_CACHE.members ? { members: MEMBERS_CACHE.members, payments: MEMBERS_CACHE.payments, gymEntries: MEMBERS_CACHE.gymEntries } : undefined
     }
@@ -244,7 +271,7 @@ export default function Members() {
     if (!data) return;
     try {
       setRows(data.members || []);
-      setPayIdx(buildPaymentIndex(data.payments || []));
+      setPayIdx(useFirestore ? buildMemberStatusIndex(data.members || []) : buildPaymentIndex(data.payments || []));
       setVisitIdx(buildLastVisitIndex(data.gymEntries || []));
       MEMBERS_CACHE.members = data.members || [];
       MEMBERS_CACHE.payments = data.payments || [];
@@ -258,7 +285,7 @@ export default function Members() {
     } catch (e) {
       console.error('Members: failed to hydrate from SWR data', e);
     }
-  }, [data]);
+  }, [data, useFirestore]);
 
   // On mount: load local cached members first for instant UI
   useEffect(() => {
@@ -278,16 +305,11 @@ export default function Members() {
       if (!debouncedQ) return;
       setLoading(true);
       try {
-        const [mRes, pRes, gRes] = await Promise.all([
-          api.searchMembersByName(debouncedQ),
-          api.fetchPayments(),
-          api.fetchGymEntries()
-        ]);
+        const mRes = await api.searchMembersByName(debouncedQ);
         if (cancelled) return;
         const members = (mRes?.rows ?? []).map(normRow);
         setRows(members);
-        setPayIdx(buildPaymentIndex(pRes?.rows || []));
-        setVisitIdx(buildLastVisitIndex(gRes?.rows || []));
+        setPayIdx(buildMemberStatusIndex(members));
       } catch (e) {
         if (!cancelled) setError(e?.message || String(e));
       } finally {
