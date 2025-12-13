@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import api from "../api";
 import displayName from "../lib/displayName";
 import { fmtDate, fmtDateTime, display } from "./MemberDetail.jsx";
 import ModalWrapper from "../components/ModalWrapper.jsx";
+import { getMemberPills } from "../lib/discount.js";
 
 const {
   fetchMembers,
@@ -80,6 +82,7 @@ function monthKeysBetween(startKey, endKey) {
 
 export default function Reports() {
   const useFirestore = String(import.meta.env.VITE_USE_FIRESTORE ?? "true") === "true";
+  const navigate = useNavigate();
 
   const START_MONTH = "2025-11";
 
@@ -109,6 +112,7 @@ export default function Reports() {
   const [totalsByMonth, setTotalsByMonth] = useState({}); // { [monthKey]: { revenue, expenses } }
 
   const [revCollapsed, setRevCollapsed] = useState(false);
+  const [expCollapsed, setExpCollapsed] = useState(false);
   const [openAddRevenue, setOpenAddRevenue] = useState(false);
   const [openAddExpense, setOpenAddExpense] = useState(false);
   const [revenueForm, setRevenueForm] = useState({ Date: manilaTodayYMD(), Category: "Grocery", Particulars: "", Mode: "Cash", Cost: "" });
@@ -345,15 +349,45 @@ export default function Reports() {
         if (!pid) return false;
         return String(m.MemberID || m.member_id || m.id || "").trim() === pid;
       }) : null;
+      const memberId = !isManual ? String(member?.MemberID || member?.member_id || member?.id || pid || "").trim() : "";
       const paidRaw = candidates(p);
       const nickCell = isManual ? (p.Category || p.category || '-') : displayName(member);
+      const pills = !isManual && member ? getMemberPills(member) : [];
       const particulars = isManual
         ? (p.Particulars || p.particulars || '-')
         : (p.Particulars || p.particulars || p.type || p.item || p.category || p.product || p.paymentfor || p.plan || p.description);
+
+      const isClickable = !isManual && !!memberId;
+      const onRowClick = isClickable
+        ? () => {
+            try {
+              navigate(`/members/${encodeURIComponent(memberId)}`, { state: { row: member } });
+            } catch (e) {}
+          }
+        : undefined;
+
       return (
-        <tr key={idx}>
+        <tr
+          key={idx}
+          className={isClickable ? "row-link" : undefined}
+          onClick={onRowClick}
+          style={isClickable ? { cursor: 'pointer' } : undefined}
+        >
           <td>{display(fmtDateTime(paidRaw))}</td>
-          <td>{display(nickCell)}</td>
+          <td style={{ textAlign: 'center' }}>
+            {isManual ? (
+              display(nickCell)
+            ) : (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
+                <strong>{display(String(nickCell || '').toUpperCase())}</strong>
+                {pills.length > 0 && (
+                  <span style={{ display: 'inline-flex', gap: 6 }}>
+                    {pills.map(p => <span key={p.key} className={`pill ${p.className}`}>{p.label}</span>)}
+                  </span>
+                )}
+              </span>
+            )}
+          </td>
           <td>{display(particulars)}</td>
           <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>{display(p.Mode || p.mode || p.method)}</td>
           <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>{display((parseFloat(p.Cost || p.amount || 0) || 0).toLocaleString())}</td>
@@ -540,33 +574,41 @@ export default function Reports() {
         <div style={{ marginTop: 24 }} className="panel">
           <div className="panel-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
             <span>Expenses</span>
-            <button className="button" type="button" onClick={() => { resetExpenseForm(); setOpenAddExpense(true); }}>
-              Add Expense
-            </button>
+            <div style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}>
+              <button className="button" type="button" onClick={() => setExpCollapsed(v => !v)} style={{ background: '#eee', color: '#333' }}>
+                {expCollapsed ? 'Expand' : 'Collapse'}
+              </button>
+              <button className="button" type="button" onClick={() => { resetExpenseForm(); setOpenAddExpense(true); }}>
+                Add Expense
+              </button>
+            </div>
           </div>
-          <table className="aligned payments-table">
-            <colgroup>
-              <col style={{ width: '28%' }} />
-              <col style={{ width: '24%' }} />
-              <col style={{ width: '28%' }} />
-              <col style={{ width: '20%' }} />
-            </colgroup>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Category</th>
-                <th>Item</th>
-                <th style={{ textAlign: 'right' }}>Cost</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(!expenseRows || (Array.isArray(expenseRows) && expenseRows.length === 0)) ? (
-                <tr><td colSpan={4}>-</td></tr>
-              ) : (
-                expenseRows
-              )}
-            </tbody>
-          </table>
+
+          {!expCollapsed && (
+            <table className="aligned payments-table">
+              <colgroup>
+                <col style={{ width: '28%' }} />
+                <col style={{ width: '24%' }} />
+                <col style={{ width: '28%' }} />
+                <col style={{ width: '20%' }} />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Category</th>
+                  <th>Item</th>
+                  <th style={{ textAlign: 'right' }}>Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(!expenseRows || (Array.isArray(expenseRows) && expenseRows.length === 0)) ? (
+                  <tr><td colSpan={4}>-</td></tr>
+                ) : (
+                  expenseRows
+                )}
+              </tbody>
+            </table>
+          )}
         </div>
 
         <ModalWrapper
