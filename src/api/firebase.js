@@ -14,6 +14,33 @@ const COLS = {
   pricing: 'pricing',
 };
 
+function manilaYMD(d) {
+  try {
+    const date = d instanceof Date ? d : new Date(d);
+    if (!date || isNaN(date)) return '';
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Manila',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(date);
+  } catch (e) {
+    return '';
+  }
+}
+
+function manilaStartOfDay(ymd) {
+  try {
+    const s = String(ymd || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+    // Force +08:00 regardless of user's local timezone.
+    const d = new Date(`${s}T00:00:00+08:00`);
+    return isNaN(d) ? null : d;
+  } catch (e) {
+    return null;
+  }
+}
+
 function ymdNext(ymd) {
   try {
     const [yy, mm, dd] = String(ymd || '').split('-').map((n) => Number(n));
@@ -69,14 +96,15 @@ function monthKeyToLocalRange(monthKey) {
 
 function mergeById(...lists) {
   const map = new Map();
+  const extras = [];
   for (const list of lists) {
     for (const r of (list || [])) {
       const id = r && (r.id || r._id);
-      if (!id) continue;
+      if (!id) { extras.push(r); continue; }
       map.set(id, r);
     }
   }
-  return Array.from(map.values());
+  return Array.from(map.values()).concat(extras);
 }
 
 // Map common sheet names (legacy) to collections
@@ -541,6 +569,7 @@ export async function fetchMembersRecent({ limit = 200, days = 90 } = {}) {
   const cutoffYMD = cutoff.toISOString().slice(0, 10);
 
   // Avoid full-collection scans: only look at recent gymEntries/payments, derive member IDs, then fetch only those members.
+  // Also include currently-active payments (by valid-until) so status columns are correct even if the payment isn't recent.
   let paymentsRaw = [];
   let entriesRaw = [];
   try {
@@ -575,10 +604,13 @@ export async function fetchMembersRecent({ limit = 200, days = 90 } = {}) {
       return [];
     };
 
-    [paymentsRaw, entriesRaw] = await Promise.all([
+    const [recentPays, recentEntries, activePays] = await Promise.all([
       querySince(COLS.payments),
       querySince(COLS.gymEntries),
+      fetchPaymentsActive({ limit: 4000 }).then((r) => (r?.rows || r?.data || [])).catch(() => []),
     ]);
+    paymentsRaw = mergeById(recentPays || [], activePays || []);
+    entriesRaw = recentEntries || [];
   } catch (e) {
     paymentsRaw = entriesRaw = [];
   }
@@ -697,6 +729,73 @@ export async function fetchMembersRecent({ limit = 200, days = 90 } = {}) {
   }
 
   return { rows: out.slice(0, max), payments: paymentsRaw || [], gymEntries: entriesRaw || [] };
+}
+
+// Fetch only currently-active payments by querying valid-until fields.
+// This is used to compute membership/coach status without scanning all payments.
+export async function fetchPaymentsActive({ limit = 4000 } = {}) {
+  const today = manilaYMD(new Date());
+  const startTs = manilaStartOfDay(today);
+  if (!today) return { rows: [] };
+
+  const fields = {
+    gym: ['GymValidUntil', 'gym_valid_until', 'gymvaliduntil', 'gym_until', 'membershipEnd', 'membership_end'],
+    coach: ['CoachValidUntil', 'coach_valid_until', 'coachvaliduntil', 'coach_until', 'coachEnd', 'coach_end', 'coach_subscription_end', 'coach_subscription_end_date'],
+    end: ['EndDate', 'enddate', 'end_date', 'valid_until', 'expiry', 'expires', 'until', 'end'],
+  };
+
+  const out = [];
+  const seen = new Set();
+  const addRows = (rows) => {
+    for (const r of (rows || [])) {
+      const id = r && (r.id || r._id);
+      // In tests/mocks some rows may not have Firestore doc ids; fall back to a stable fingerprint.
+      const fp = id || (() => {
+        const mid = String(r?.MemberID || r?.member_id || r?.memberId || r?.memberid || r?.id || '').trim();
+        const dt = String(r?.Date || r?.date || r?.createdAt || r?.created_at || r?.timestamp || '').trim();
+        const amt = String(r?.Cost || r?.amount || '').trim();
+        const part = String(r?.Particulars || r?.particulars || r?.type || r?.item || '').trim();
+        return ['p', mid, dt, amt, part].join('|');
+      })();
+      if (!fp || seen.has(fp)) continue;
+      seen.add(fp);
+      out.push(r);
+      if (out.length >= limit) break;
+    }
+  };
+
+  const queryField = async (field, value) => {
+    try {
+      const rows = await fb.queryCollection(COLS.payments, {
+        wheres: [{ field, op: '>=', value }],
+        limit,
+      });
+      addRows(rows);
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  // Prefer string YYYY-MM-DD comparisons; then Timestamp comparisons.
+  for (const group of Object.values(fields)) {
+    for (const f of group) {
+      if (out.length >= limit) break;
+      await queryField(f, today);
+    }
+    if (out.length >= limit) break;
+  }
+
+  if (out.length === 0 && startTs) {
+    for (const group of Object.values(fields)) {
+      for (const f of group) {
+        if (out.length >= limit) break;
+        await queryField(f, startTs);
+      }
+      if (out.length >= limit) break;
+    }
+  }
+
+  return { rows: out.slice(0, limit) };
 }
 
 // Simple search across member name fields. Firestore lacks rich text search in the client SDK,
@@ -907,6 +1006,58 @@ export async function fetchPaymentsForMonth(monthKey, { limit = 8000 } = {}) {
 // Realtime listeners so UI only updates when docs change.
 export function listenMembers(onRows, onError) {
   return fb.listenCollection(COLS.members, onRows, onError);
+}
+
+// Listen to currently-active payments (by valid-until fields). Merges multiple queries.
+export function listenPaymentsActive(onRows, onError, { limit = 4000 } = {}) {
+  const today = manilaYMD(new Date());
+  const startTs = manilaStartOfDay(today);
+  let rowsA = [];
+  let rowsB = [];
+  let rowsC = [];
+  let rowsD = [];
+  let rowsE = [];
+  let rowsF = [];
+  const emit = () => {
+    try { onRows && onRows(mergeById(rowsA, rowsB, rowsC, rowsD, rowsE, rowsF)); } catch (e) { /* ignore */ }
+  };
+  const unsubs = [];
+
+  const listenField = (field, idx, value) => {
+    try {
+      unsubs.push(
+        fb.listenQueryCollection(
+          COLS.payments,
+          { wheres: [{ field, op: '>=', value }], limit },
+          (r) => {
+            const rows = r || [];
+            if (idx === 0) rowsA = rows;
+            else if (idx === 1) rowsB = rows;
+            else if (idx === 2) rowsC = rows;
+            else if (idx === 3) rowsD = rows;
+            else if (idx === 4) rowsE = rows;
+            else if (idx === 5) rowsF = rows;
+            emit();
+          },
+          onError
+        )
+      );
+    } catch (e) { /* ignore */ }
+  };
+
+  // Keep listener count low: listen to the most common 3 keys as strings,
+  // and their Timestamp variants as fallbacks.
+  const keys = ['GymValidUntil', 'CoachValidUntil', 'EndDate'];
+  keys.forEach((k, i) => listenField(k, i, today));
+  if (startTs) {
+    keys.forEach((k, i) => listenField(k, i + 3, startTs));
+  }
+
+  return () => {
+    for (const u of unsubs) {
+      try { typeof u === 'function' && u(); } catch (e) { /* ignore */ }
+    }
+  };
 }
 
 export function listenGymEntriesForDate(dateYMD, onRows, onError) {

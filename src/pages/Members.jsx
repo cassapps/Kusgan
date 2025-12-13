@@ -252,6 +252,7 @@ export default function Members() {
   const [openAdd, setOpenAdd] = useState(false);
   const containerRef = useRef(null);
   const [listHeight, setListHeight] = useState(600);
+  const paymentsRef = useRef([]);
 
   // compute a responsive list height so the members list fills the viewport
   useEffect(() => {
@@ -301,8 +302,10 @@ export default function Members() {
       setRows(data.members || []);
       if (useFirestore) {
         const pays = data.payments || [];
+        paymentsRef.current = pays;
         setPayIdx((pays && pays.length) ? buildPaymentIndex(pays) : buildMemberStatusIndex(data.members || []));
       } else {
+        paymentsRef.current = data.payments || [];
         setPayIdx(buildPaymentIndex(data.payments || []));
       }
       setVisitIdx(buildLastVisitIndex(data.gymEntries || []));
@@ -342,7 +345,17 @@ export default function Members() {
         if (cancelled) return;
         const members = (mRes?.rows ?? []).map(normRow);
         setRows(members);
-        setPayIdx(buildMemberStatusIndex(members));
+        if (useFirestore) {
+          const ids = new Set(members.map((m) => String(firstOf(m, ["memberid","member_id","id","member_id_"]) || '').trim()).filter(Boolean));
+          const basePays = paymentsRef.current || [];
+          const relevantPays = (basePays || []).filter((p) => {
+            const mid = String(p?.MemberID || p?.member_id || p?.memberId || p?.memberid || p?.id || '').trim();
+            return mid && ids.has(mid);
+          });
+          setPayIdx(relevantPays.length ? buildPaymentIndex(relevantPays) : buildMemberStatusIndex(members));
+        } else {
+          setPayIdx(buildMemberStatusIndex(members));
+        }
       } catch (e) {
         if (!cancelled) setError(e?.message || String(e));
       } finally {
@@ -351,7 +364,7 @@ export default function Members() {
     }
     if (debouncedQ) doSearch();
     return () => { cancelled = true; };
-  }, [debouncedQ]);
+  }, [debouncedQ, useFirestore]);
 
   // mirror SWR loading/error into local state for existing UI
   useEffect(() => {

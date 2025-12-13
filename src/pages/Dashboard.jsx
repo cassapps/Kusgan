@@ -13,6 +13,7 @@ const {
   listenGymEntriesForDate,
   listenPaymentsForDate,
   listenPaymentsForMonth,
+  listenPaymentsActive,
 } = api;
 import { useNavigate } from "react-router-dom";
 import { fmtTime, fmtDate, display } from "./MemberDetail.jsx";
@@ -58,6 +59,7 @@ export default function Dashboard() {
   const [payments, setPayments] = useState([]);
   const [paymentsToday, setPaymentsToday] = useState([]);
   const [paymentsMonth, setPaymentsMonth] = useState([]);
+  const [paymentsActive, setPaymentsActive] = useState([]);
   const [gymEntries, setGymEntries] = useState([]);
   const [pricing, setPricing] = useState([]);
   const [showAllGym, setShowAllGym] = useState(false);
@@ -186,6 +188,17 @@ export default function Dashboard() {
     return map;
   }, [payments]);
 
+  const activePaymentsByMember = useMemo(() => {
+    const map = new Map();
+    for (const p of (paymentsActive || [])) {
+      const id = String(p?.MemberID || p?.member_id || p?.id || p?.member || '').trim();
+      if (!id) continue;
+      if (!map.has(id)) map.set(id, []);
+      map.get(id).push(p);
+    }
+    return map;
+  }, [paymentsActive]);
+
   const lastVisitByMember = useMemo(() => {
     const map = new Map();
     for (const e of (gymEntries || [])) {
@@ -216,13 +229,23 @@ export default function Dashboard() {
         if (!memberId) continue;
 
         if (useFirestore) {
+          // Prefer payment-derived status when available (works even if member docs lack denormalized fields)
+          const pays = activePaymentsByMember.get(memberId) || [];
+          const stFromPays = pays.length ? computeStatusForMember(pays, m, pricing || []) : null;
+
           const membershipState = String(m?.membershipState || m?.membership_state || m?.status || '').trim().toLowerCase();
           const coachState = String(m?.coachState || m?.coach_state || '').trim().toLowerCase();
           const gymUntil = pick(m, ["membershipEnd","membership_end","gymvaliduntil","gym_valid_until","gym_until","enddate","end_date","valid_until","expiry","expires","until","end","gym_valid","gym_validity","gymvalid"]);
           const coachUntil = pick(m, ["coachEnd","coach_end","coach_subscription_end","coach_subscription_end_date","coachvaliduntil","coach_valid_until","coach_until","coach_expiry","coach_expires"]);
-          const gymActive = (membershipState === 'active') || isDateActive(gymUntil);
-          const coachActive = (coachState === 'active') || isDateActive(coachUntil);
-          const st = { membershipState: gymActive ? 'active' : 'inactive', coachActive: !!coachActive, membershipEnd: gymUntil || null, coachEnd: coachUntil || null };
+
+          const gymActive = (stFromPays?.membershipState === 'active') || (membershipState === 'active') || isDateActive(gymUntil);
+          const coachActive = (stFromPays?.coachActive === true) || (coachState === 'active') || isDateActive(coachUntil);
+          const st = {
+            membershipState: gymActive ? 'active' : 'inactive',
+            coachActive: !!coachActive,
+            membershipEnd: (stFromPays?.membershipEnd || gymUntil || null),
+            coachEnd: (stFromPays?.coachEnd || coachUntil || null),
+          };
           if (gymActive) outGym.push({ member: m, memberId, st });
           if (coachActive) outCoach.push({ member: m, memberId, st });
         } else {
@@ -236,7 +259,7 @@ export default function Dashboard() {
     } catch (e) {
       return { gym: [], coach: [] };
     }
-  }, [useFirestore, members, paymentsByMember, pricing, isDateActive]);
+  }, [useFirestore, members, paymentsByMember, activePaymentsByMember, pricing, isDateActive]);
 
   const openActiveList = (kind) => {
     setActiveModalKind(kind);
@@ -497,6 +520,7 @@ export default function Dashboard() {
       let unsubMembers = null;
       let unsubGym = null;
       let unsubPayToday = null;
+      let unsubPayActive = null;
 
       setLoading(true);
       setIsRefreshing(true);
@@ -533,6 +557,13 @@ export default function Dashboard() {
         }, () => {});
       } catch (e) { /* ignore */ }
 
+      try {
+        unsubPayActive = listenPaymentsActive((rows) => {
+          if (!alive) return;
+          setPaymentsActive(rows || []);
+        }, () => {});
+      } catch (e) { /* ignore */ }
+
       setLoading(false);
       setIsRefreshing(false);
 
@@ -541,6 +572,7 @@ export default function Dashboard() {
         try { unsubMembers && unsubMembers(); } catch (e) {}
         try { unsubGym && unsubGym(); } catch (e) {}
         try { unsubPayToday && unsubPayToday(); } catch (e) {}
+        try { unsubPayActive && unsubPayActive(); } catch (e) {}
       };
     }
 
@@ -781,12 +813,20 @@ export default function Dashboard() {
       let activeGym = 0;
       let activeCoach = 0;
       for (const m of (members || [])) {
+        const memberId = resolveMemberId(m);
+        if (!memberId) continue;
+
+        // Prefer payment-derived status when available
+        const pays = activePaymentsByMember.get(memberId) || [];
+        const stFromPays = pays.length ? computeStatusForMember(pays, m, pricing || []) : null;
+
         const membershipState = String(m?.membershipState || m?.membership_state || m?.status || '').trim().toLowerCase();
         const coachState = String(m?.coachState || m?.coach_state || '').trim().toLowerCase();
         const gymUntil = pick(m, ["membershipEnd","membership_end","gymvaliduntil","gym_valid_until","gym_until","enddate","end_date","valid_until","expiry","expires","until","end","gym_valid","gym_validity","gymvalid"]);
         const coachUntil = pick(m, ["coachEnd","coach_end","coach_subscription_end","coach_subscription_end_date","coachvaliduntil","coach_valid_until","coach_until","coach_expiry","coach_expires"]);
-        const gymActive = (membershipState === 'active') || isDateActive(gymUntil);
-        const coachActive = (coachState === 'active') || isDateActive(coachUntil);
+
+        const gymActive = (stFromPays?.membershipState === 'active') || (membershipState === 'active') || isDateActive(gymUntil);
+        const coachActive = (stFromPays?.coachActive === true) || (coachState === 'active') || isDateActive(coachUntil);
         if (gymActive) activeGym++;
         if (coachActive) activeCoach++;
       }
@@ -841,7 +881,7 @@ export default function Dashboard() {
     } catch (e) {
       console.warn('Failed to recompute stats on data change', e);
     }
-  }, [useFirestore, members, payments, paymentsToday, gymEntries, pricing]);
+  }, [useFirestore, members, payments, paymentsToday, paymentsActive, gymEntries, pricing, activePaymentsByMember]);
 
   // Checkout handler: attempt to close an open gym entry for the given member id.
   const handleCheckout = async (entry, payload = {}) => {
