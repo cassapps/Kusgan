@@ -53,6 +53,8 @@ const displayTime = (row) => {
   } catch (e) { return '—'; }
 };
 
+const isHHMM = (v) => /^\d{1,2}:\d{2}$/.test(String(v || '').trim());
+
 const rowDateYMD = (r) => {
   try {
     const rawVal = r?.Date || r?.date || r?.time_in || r?.timeIn || r?.Timestamp || r?.timestamp || r?.TimestampISO || r?.timestampISO || '';
@@ -170,6 +172,37 @@ export default function StaffAttendance() {
     const tout = String(r?.TimeOut || r?.time_out || r?.timeout || '').trim();
     return tout === '' || tout === '-' || tout === '—' || tout === 'null' || typeof tout === 'undefined';
   };
+  const timeToDate = (r, which) => {
+    const ymd = rowDateYMD(r) || todayYMDManila;
+    const iso = (which === 'in')
+      ? (r?.time_in || r?.timeIn || r?.TimeIn || r?.TimeInISO)
+      : (r?.time_out || r?.timeOut || r?.TimeOut || r?.TimeOutISO);
+    if (iso && typeof iso === 'string') {
+      const d = new Date(iso);
+      if (!isNaN(d)) return d;
+    }
+    const hhmm = (which === 'in')
+      ? (r?.time_in_short || (isHHMM(r?.TimeIn) ? r?.TimeIn : null) || (isHHMM(r?.time_in) ? r?.time_in : null))
+      : ((isHHMM(r?.TimeOut) ? r?.TimeOut : null) || (isHHMM(r?.time_out) ? r?.time_out : null));
+    if (hhmm && isHHMM(hhmm)) {
+      const d = new Date(`${ymd}T${String(hhmm).padStart(5, '0')}:00+08:00`);
+      if (!isNaN(d)) return d;
+    }
+    return null;
+  };
+
+  const computeHours1dp = (r) => {
+    try {
+      const a = timeToDate(r, 'in');
+      const b = timeToDate(r, 'out');
+      if (!a || !b) return '—';
+      const hrs = (b.getTime() - a.getTime()) / (1000 * 60 * 60);
+      if (!isFinite(hrs) || hrs < 0) return '—';
+      return String(Math.round(hrs * 10) / 10);
+    } catch {
+      return '—';
+    }
+  };
 
   const load = async () => {
     setLoading(true); setError('');
@@ -232,7 +265,8 @@ export default function StaffAttendance() {
 
   // Coaching sessions UI state
   const COACHES = ['Coach Jojo', 'Coach Elmer'];
-  const [selectedCoach, setSelectedCoach] = useState(COACHES[0]);
+  // '' means All Coaches
+  const [selectedCoach, setSelectedCoach] = useState('');
 
   // Attendance table filter state
   const [attStaffFilter, setAttStaffFilter] = useState('');
@@ -253,10 +287,7 @@ export default function StaffAttendance() {
   // ensure selectedCoach is valid when coachOptions change
   useEffect(() => {
     try {
-      if (!selectedCoach && coachOptions && coachOptions.length) setSelectedCoach(coachOptions[0]);
-      if (selectedCoach && coachOptions && coachOptions.length && !coachOptions.includes(selectedCoach)) {
-        setSelectedCoach(coachOptions[0]);
-      }
+      if (selectedCoach && coachOptions && coachOptions.length && !coachOptions.includes(selectedCoach)) setSelectedCoach('');
     } catch (e) { /* ignore */ }
   }, [coachOptions]);
 
@@ -481,12 +512,10 @@ export default function StaffAttendance() {
     <div className="dashboard-content">
       <h2 className="dashboard-title">Staff Attendance <RefreshBadge show={loading && !busy} /></h2>
       <div className="panel">
-        <div className="panel-header">Select Staff Member</div>
-        {error && <div className="small-error">{error}</div>}
-
-        <div style={{ display: 'flex', justifyContent: 'center' }}>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', padding: 12, flexWrap: 'wrap' }}>
-            <select value={selected} onChange={e => setSelected(e.target.value)} style={{ width: 300, height: 44, padding: '8px 12px', border: '1px solid #e7e8ef', borderRadius: 10, fontSize: 16 }}>
+        <div className="panel-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <span>Select Staff Member</span>
+          <div style={{ display: 'inline-flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <select value={selected} onChange={e => setSelected(e.target.value)} style={{ height: 44, padding: '8px 12px', border: '1px solid #e7e8ef', borderRadius: 10, fontSize: 16, minWidth: 240 }}>
               <option value="">(choose)</option>
               {availableStaffForClockIn.length === 0 ? (
                 <option value="" disabled>All staff already clocked in today</option>
@@ -499,6 +528,8 @@ export default function StaffAttendance() {
             </button>
           </div>
         </div>
+
+        {error && <div className="small-error">{error}</div>}
 
         <div style={{ overflowX: 'auto', padding: 8 }}>
           <table className="attendance-table aligned" style={{ width: '100%' }}>
@@ -583,10 +614,7 @@ export default function StaffAttendance() {
                     const tinDisp = displayTime(r);
                     const toutIso = r?.time_out || r?.TimeOut || r?.timeOut || '';
                     const toutDisp = toutIso ? (toutIso.length === 5 ? displayTime({ TimeIn: toutIso }) : fmtTime(toutIso)) : '—';
-                    const hours = (typeof r?.TotalHours !== 'undefined' && r?.TotalHours !== null) ? String(r?.TotalHours)
-                      : (typeof r?.NoOfHours !== 'undefined' && r?.NoOfHours !== null) ? String(r?.NoOfHours)
-                      : (typeof r?.hours !== 'undefined' && r?.hours !== null) ? String(r?.hours)
-                      : '—';
+                    const hours = computeHours1dp(r);
                     // determine if this entry is currently "on" (no sign-out) and is for today
                     const toutRaw = String(r?.TimeOut || r?.time_out || r?.timeout || '').trim();
                     const noOut = toutRaw === '' || toutRaw === '-' || toutRaw === '—' || toutRaw === 'null' || typeof toutRaw === 'undefined';
@@ -627,6 +655,7 @@ export default function StaffAttendance() {
               {coachCollapsed ? 'Expand' : 'Collapse'}
             </button>
             <select value={selectedCoach} onChange={(e) => setSelectedCoach(e.target.value)} style={{ height: 44, padding: '8px 12px', border: '1px solid #e7e8ef', borderRadius: 10, fontSize: 16, minWidth: 220 }}>
+              <option value="">All Coaches</option>
               {coachOptions.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
             <select value={coachPeriodIndex} onChange={(e) => setCoachPeriodIndex(Number(e.target.value))} style={{ height: 44, padding: '8px 12px', border: '1px solid #e7e8ef', borderRadius: 10, fontSize: 16, minWidth: 220 }}>
@@ -643,29 +672,22 @@ export default function StaffAttendance() {
                 <thead>
                   <tr>
                     <th>Date</th>
+                    <th>Coach</th>
                     <th>Nickname</th>
                     <th>Time In</th>
-                    <th>Time Out</th>
-                    <th style={{ textAlign: 'center' }}>Total Hours</th>
                     <th>Focus</th>
                   </tr>
                 </thead>
                 <tbody>
                   {!periods || periods.length === 0 ? (
-                    <tr><td colSpan={6}>No periods</td></tr>
+                    <tr><td colSpan={5}>No periods</td></tr>
                   ) : coachingPager.visible.length === 0 ? (
-                    <tr><td colSpan={6}>No sessions for selected coach / period.</td></tr>
+                    <tr><td colSpan={5}>No sessions for selected coach / period.</td></tr>
                   ) : (
                     coachingPager.visible.map((r, i) => {
                       const ymd = rowDateYMD(r) || '';
                       const tin = displayTime(r);
-                      const toutIso = r?.time_out || r?.TimeOut || r?.timeOut || '';
-                      const tout = toutIso ? (toutIso.length === 5 ? displayTime({ TimeIn: toutIso }) : fmtTime(toutIso)) : '—';
-                      const hours = (typeof r?.TotalHours !== 'undefined' && r?.TotalHours !== null) ? String(r?.TotalHours)
-                        : (typeof r?.NoOfHours !== 'undefined' && r?.NoOfHours !== null) ? String(r?.NoOfHours)
-                        : (typeof r?.TotalHours !== 'undefined' && r?.TotalHours !== null) ? String(r?.TotalHours)
-                        : (typeof r?.hours !== 'undefined' && r?.hours !== null) ? String(r?.hours)
-                        : '—';
+                      const coach = String(r?.Coach || r?.coach || '').trim();
                       // Resolve nickname by looking up members collection (same as Dashboard)
                       const pid = String(r?.MemberID || r?.memberid || r?.member || r?.Member || r?.id || '').trim();
                       const member = (members || []).find(m => String(m?.MemberID || m?.memberid || m?.id || '').trim() === pid) || null;
@@ -673,10 +695,9 @@ export default function StaffAttendance() {
                       return (
                         <tr key={(ymd || '') + '|' + nick + '|' + i} style={{ cursor: 'pointer' }} onClick={() => setSelectedVisit(r)}>
                           <td>{fmtDate(ymd)}</td>
+                          <td style={{ fontWeight: 700 }}>{coach || '—'}</td>
                           <td style={{ fontWeight: 700 }}>{nick}</td>
                           <td>{tin}</td>
-                          <td>{tout}</td>
-                          <td style={{ textAlign: 'center' }}>{hours}</td>
                           <td>{String(r?.Focus || r?.focus || '')}</td>
                         </tr>
                       );
