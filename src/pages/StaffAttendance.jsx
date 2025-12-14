@@ -67,8 +67,34 @@ const rowDateYMD = (r) => {
     const raw = String(rawVal || '').trim();
     if (!raw) return '';
     if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw.slice(0,10);
+
+    // Legacy formats like "Nov-22, 2025" or "Nov 22, 2025"
+    const mdy = raw.match(/^([A-Za-z]{3,})[-\s](\d{1,2}),?\s*(\d{4})$/);
+    if (mdy) {
+      const monRaw = String(mdy[1] || '').slice(0, 3).toLowerCase();
+      const day = Number(mdy[2]);
+      const year = Number(mdy[3]);
+      const map = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+      const mi = map[monRaw];
+      if (Number.isFinite(mi) && day >= 1 && day <= 31 && year >= 2000) return ymdFromPartsManila(year, mi, day);
+    }
+
+    // Legacy numeric formats like "11/22/2025" (assume MM/DD/YYYY)
+    const mmddyyyy = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (mmddyyyy) {
+      const mm = Number(mmddyyyy[1]);
+      const dd = Number(mmddyyyy[2]);
+      const yy = Number(mmddyyyy[3]);
+      if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31 && yy >= 2000) return ymdFromPartsManila(yy, mm - 1, dd);
+    }
+
     const d = new Date(raw);
     if (!isNaN(d)) return new Intl.DateTimeFormat('en-CA', { timeZone: MANILA_TZ }).format(d);
+
+    // As a last attempt, normalize hyphenated month strings
+    const normalized = raw.replace(/-/g, ' ');
+    const d2 = new Date(normalized);
+    if (!isNaN(d2)) return new Intl.DateTimeFormat('en-CA', { timeZone: MANILA_TZ }).format(d2);
     return raw.slice(0,10);
   } catch (e) { return ''; }
 };
@@ -201,6 +227,18 @@ export default function StaffAttendance() {
       return String(Math.round(hrs * 10) / 10);
     } catch {
       return '—';
+    }
+  };
+
+  const sortByTimeInDesc = (a, b) => {
+    try {
+      const da = timeToDate(a, 'in') || (rowDateYMD(a) ? new Date(rowDateYMD(a) + 'T00:00:00+08:00') : null);
+      const db = timeToDate(b, 'in') || (rowDateYMD(b) ? new Date(rowDateYMD(b) + 'T00:00:00+08:00') : null);
+      const ta = da && !isNaN(da) ? da.getTime() : 0;
+      const tb = db && !isNaN(db) ? db.getTime() : 0;
+      return tb - ta;
+    } catch {
+      return 0;
     }
   };
 
@@ -362,11 +400,7 @@ export default function StaffAttendance() {
         if (!staffKey) return true;
         const sKey = staffName.toLowerCase().replace(/\s+/g, '');
         return sKey.includes(staffKey) || staffKey.includes(sKey);
-      }).sort((a, b) => {
-        const aKey = (rowDateYMD(a) || '0000-00-00') + 'T' + (String(a?.TimeIn || a?.time_in || '00:00'));
-        const bKey = (rowDateYMD(b) || '0000-00-00') + 'T' + (String(b?.TimeIn || b?.time_in || '00:00'));
-        return bKey.localeCompare(aKey);
-      });
+      }).sort(sortByTimeInDesc);
     } catch {
       return [];
     }
@@ -394,7 +428,7 @@ export default function StaffAttendance() {
           if (!ymd) return false;
           return (ymd >= start && ymd <= end);
         } catch (e) { return false; }
-      }).sort((a,b) => (String(b?.TimeIn||b?.time_in||'').localeCompare(String(a?.TimeIn||a?.time_in||''))));
+      }).sort(sortByTimeInDesc);
       return filtered;
     } catch (e) { return []; }
   }, [gymVisits, periods, selectedCoach, coachPeriodIndex]);
@@ -619,12 +653,11 @@ export default function StaffAttendance() {
                     const toutRaw = String(r?.TimeOut || r?.time_out || r?.timeout || '').trim();
                     const noOut = toutRaw === '' || toutRaw === '-' || toutRaw === '—' || toutRaw === 'null' || typeof toutRaw === 'undefined';
                     const staffName = String(r?.Staff || r?.staff || r?.staff_name || '');
-                    const isToday = (rowDateYMD(r) || '') === todayYMDManila;
                     return (
                       <tr key={(ymd || '') + '|' + (String(r?.Staff || r?.staff || i))}>
                         <td>{fmtDate(ymd)}</td>
                         <td style={{ fontWeight: 700 }}>
-                          {staffName}{noOut && isToday && <span style={{ marginLeft: 8 }} className="status-badge on">On</span>}
+                          {staffName}
                         </td>
                         <td>{tinDisp}</td>
                         <td>{toutDisp}</td>
