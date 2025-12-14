@@ -3,7 +3,7 @@ import api from "../api";
 const { addPayment, fetchPricing, fetchPayments } = api;
 import ModalWrapper from "./ModalWrapper";
 import events from "../lib/events";
-import { ALLOWED_PARTICULARS, effectiveValidityDays, getParticularsDefaults, isManilaOffPeak } from "../lib/pricingRules";
+import { ALLOWED_PARTICULARS, effectiveValidityDays, getParticularsDefaults, isManilaOffPeak, isParticularsVisibleForMember } from "../lib/pricingRules";
 
 const MANILA_TZ = "Asia/Manila";
 
@@ -260,7 +260,9 @@ export default function PaymentModal({ open, onClose, memberId, onSaved, members
       if (name) pricingByName.set(name, r);
     });
 
-    return (ALLOWED_PARTICULARS || []).map((name) => {
+    return (ALLOWED_PARTICULARS || [])
+      .filter((name) => isParticularsVisibleForMember(name, member))
+      .map((name) => {
       const defaults = getParticularsDefaults(name);
       const fromDb = pricingByName.get(normalize(name));
 
@@ -281,7 +283,7 @@ export default function PaymentModal({ open, onClose, memberId, onSaved, members
         "Coach subscription": baseFlags.coach ? 'Yes' : 'No',
       };
     });
-  }, [pricing]);
+  }, [pricing, member]);
 
   // Clear selection if it disappears (shouldn't happen with the allowlist, but keep it safe)
   useEffect(() => {

@@ -1,5 +1,7 @@
 const MANILA_TZ = "Asia/Manila";
 
+import { getMemberDiscountValue, isSenior as isSeniorMember } from "./discount.js";
+
 function normName(s) {
   return String(s || "")
     .trim()
@@ -91,40 +93,30 @@ export function effectiveValidityDays(particulars, rawValidityDays) {
 }
 
 export function isParticularsVisible(particulars, ctx) {
+  return isParticularsVisibleForMember(particulars, ctx?.member);
+}
+
+// UI visibility rules (requested):
+// - Daily Pass - Special: only if member Discount=Special
+// - Monthly Pass - Student: only if member Discount=Student
+// - Monthly Pass - Senior: only if member age >= 60
+// Everything else in the allowlist remains visible.
+export function isParticularsVisibleForMember(particulars, member) {
   if (!isAllowedParticulars(particulars)) return false;
-
-  // Temporary override: show all allowed Particulars regardless of eligibility.
-  // (Still hides unknown/legacy items via the allowlist above.)
-  if (ctx?.showAllParticulars) return true;
-
   const name = normName(particulars);
-  const isOffPeak = !!ctx?.isOffPeak;
-  const hasActiveGym = !!ctx?.hasActiveGym;
-  const hasActiveCoach = !!ctx?.hasActiveCoach;
-  const isStudent = !!ctx?.isStudent;
-  const isSenior = !!ctx?.isSenior;
-  const isSpecial = !!ctx?.isSpecial;
 
-  // Gym membership only
-  if (name === normName("Daily Pass - Off Peak")) return !hasActiveGym && isOffPeak && !isSpecial;
-  if (name === normName("Daily Pass - Peak")) return !hasActiveGym && !isOffPeak && !isSpecial;
-  if (name === normName("Daily Pass - Special")) return !hasActiveGym && isSpecial;
+  if (name === normName("Daily Pass - Special")) {
+    if (!member) return false;
+    return getMemberDiscountValue(member) === "special";
+  }
+  if (name === normName("Monthly Pass - Student")) {
+    if (!member) return false;
+    return getMemberDiscountValue(member) === "student";
+  }
+  if (name === normName("Monthly Pass - Senior")) {
+    if (!member) return false;
+    return isSeniorMember(member);
+  }
 
-  if (name === normName("Monthly Pass - Student")) return isStudent;
-  if (name === normName("Monthly Pass - Senior")) return isSenior && isSpecial;
-  if (name === normName("Monthly Pass - Regular")) return !isStudent && !(isSenior && isSpecial);
-  if (name === normName("Yearly Pass - Regular")) return true;
-
-  // Coach subscription only (all require an active gym membership)
-  if (name === normName("Daily Coach - Off Peak")) return hasActiveGym && !hasActiveCoach && isOffPeak;
-  if (name === normName("Daily Coach Only")) return hasActiveGym && !hasActiveCoach && !isOffPeak;
-  if (name === normName("Monthly Coach Only")) return hasActiveGym;
-
-  // Gym & Coach bundle
-  if (name === normName("Daily Pass w/ Coach - Off Peak")) return !hasActiveGym && !hasActiveCoach && isOffPeak;
-  if (name === normName("Daily Pass w/ Coach")) return !hasActiveGym && !hasActiveCoach && !isOffPeak;
-  if (name === normName("Monthly Pass w/ Coach")) return true;
-
-  // Merchandise (allowed) + any other allowed items not covered above
   return true;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { effectiveValidityDays, isManilaOffPeak, isParticularsVisible } from '../src/lib/pricingRules.js';
+import { effectiveValidityDays, isManilaOffPeak, isParticularsVisibleForMember } from '../src/lib/pricingRules.js';
 
 // Manila is UTC+8.
 const utc = (y, m, d, hh, mm) => new Date(Date.UTC(y, m - 1, d, hh, mm, 0));
@@ -19,34 +19,27 @@ describe('pricingRules', () => {
     expect(effectiveValidityDays('Yearly Pass - Regular', 365)).toBe(365);
   });
 
-  it('Daily Pass - Special hides other daily passes', () => {
-    const ctx = { hasActiveGym: false, hasActiveCoach: false, isStudent: false, isSenior: false, isSpecial: true, isOffPeak: true };
-    expect(isParticularsVisible('Daily Pass - Special', ctx)).toBe(true);
-    expect(isParticularsVisible('Daily Pass - Off Peak', ctx)).toBe(false);
-    expect(isParticularsVisible('Daily Pass - Peak', ctx)).toBe(false);
+  it('Daily Pass - Special only visible for Discount=Special', () => {
+    expect(isParticularsVisibleForMember('Daily Pass - Special', { Discount: 'Special' })).toBe(true);
+    expect(isParticularsVisibleForMember('Daily Pass - Special', { Discount: 'Student' })).toBe(false);
+    expect(isParticularsVisibleForMember('Daily Pass - Special', null)).toBe(false);
   });
 
-  it('Coach-only items require active gym membership', () => {
-    const ctxNoGym = { hasActiveGym: false, hasActiveCoach: false, isStudent: false, isSenior: false, isSpecial: false, isOffPeak: true };
-    expect(isParticularsVisible('Monthly Coach Only', ctxNoGym)).toBe(false);
+  it('Monthly Pass - Student only visible for Discount=Student', () => {
+    expect(isParticularsVisibleForMember('Monthly Pass - Student', { Discount: 'Student' })).toBe(true);
+    expect(isParticularsVisibleForMember('Monthly Pass - Student', { Discount: 'Special' })).toBe(false);
+    expect(isParticularsVisibleForMember('Monthly Pass - Student', null)).toBe(false);
+  });
 
-    const ctxGym = { ...ctxNoGym, hasActiveGym: true };
-    expect(isParticularsVisible('Monthly Coach Only', ctxGym)).toBe(true);
+  it('Monthly Pass - Senior only visible for age >= 60', () => {
+    expect(isParticularsVisibleForMember('Monthly Pass - Senior', { Age: 60 })).toBe(true);
+    expect(isParticularsVisibleForMember('Monthly Pass - Senior', { Age: 59 })).toBe(false);
+    expect(isParticularsVisibleForMember('Monthly Pass - Senior', null)).toBe(false);
   });
   
   it('Unknown/legacy Particulars are hidden', () => {
-    const ctx = { hasActiveGym: false, hasActiveCoach: false, isStudent: false, isSenior: false, isSpecial: false, isOffPeak: true };
-    expect(isParticularsVisible('Daily Pass', ctx)).toBe(false);
-    expect(isParticularsVisible('Daily Coach Offpeak', { ...ctx, hasActiveGym: true })).toBe(false);
-    expect(isParticularsVisible('Some Random Product', ctx)).toBe(false);
-  });
-
-  it('showAllParticulars shows all allowed items', () => {
-    const ctx = { hasActiveGym: true, hasActiveCoach: true, isStudent: false, isSenior: false, isSpecial: false, isOffPeak: false, showAllParticulars: true };
-    // Allowed items should be visible regardless of eligibility.
-    expect(isParticularsVisible('Daily Pass - Off Peak', ctx)).toBe(true);
-    expect(isParticularsVisible('Daily Coach - Off Peak', ctx)).toBe(true);
-    // Unknown items still hidden.
-    expect(isParticularsVisible('Daily Pass', ctx)).toBe(false);
+    expect(isParticularsVisibleForMember('Daily Pass', {})).toBe(false);
+    expect(isParticularsVisibleForMember('Daily Coach Offpeak', {})).toBe(false);
+    expect(isParticularsVisibleForMember('Some Random Product', {})).toBe(false);
   });
 });
