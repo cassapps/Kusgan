@@ -189,13 +189,6 @@ export default function MemberProfileCard({ member, status = {}, isRefreshing = 
             <div className="value">{fmtDate(status.coachEnd)}</div>
           </div>
         </div>
-
-        <div className="member-actions">
-          <button className="primary-btn" onClick={() => onEdit()} title="Edit member details">✏️ Edit</button>
-          <button className="primary-btn" onClick={() => onAddPayment()} title="Manage payments">💳 Add Payment</button>
-          <button className="primary-btn" onClick={() => onShowQr()} title="Show QR code for this member">▣ QR Code</button>
-          <button className="primary-btn" onClick={() => onShowProgress()} title="Track or view progress">📈 Progress</button>
-        </div>
       </div>
     </div>
   );

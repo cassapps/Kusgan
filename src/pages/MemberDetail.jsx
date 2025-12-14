@@ -576,6 +576,13 @@ export default function MemberDetail() {
         onCheckIn={() => { setCheckModalMode('in'); setShowCheckInConfirm(true); }}
       />
 
+      <div className="member-actions">
+        <button className="primary-btn" onClick={() => setOpenEdit(true)} title="Edit member details">✏️ Edit</button>
+        <button className="primary-btn" onClick={() => setOpenPayment(true)} title="Manage payments">💳 Add Payment</button>
+        <button className="primary-btn" onClick={() => setOpenQr(true)} title="Show QR code for this member">▣ QR Code</button>
+        <button className="primary-btn" onClick={() => setOpenProgress(true)} title="Track or view progress">📈 Progress</button>
+      </div>
+
       {/* Purchases are handled via the Add Payment modal. */}
 
       {/* Payment modal */}

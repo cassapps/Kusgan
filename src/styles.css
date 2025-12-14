@@ -591,11 +591,11 @@ table.aligned{ table-layout:fixed; margin-bottom:40px; }
   border-radius:16px; padding:16px; box-shadow:0 10px 24px rgba(0,0,0,0.05);
   /* Fill the content container so left/right padding matches tables below */
   width: 100%;
-  margin: 0 auto 28px auto; /* center within content and add bottom spacing */
+  margin: 0 auto 12px auto; /* keep actions row close below */
   box-sizing: border-box;
 }
-.member-photo{ display:flex; align-items:flex-start; }
-.member-photo .photo-box{ width: 340px; max-width: 360px; aspect-ratio: 3 / 4; overflow:hidden; border-radius:16px; border:1px solid var(--light-border, #e5e7eb); background:#fafbff; }
+.member-photo{ display:flex; align-items:stretch; }
+.member-photo .photo-box{ width: 340px; max-width: 360px; height: 100%; overflow:hidden; border-radius:16px; border:1px solid var(--light-border, #e5e7eb); background:#fafbff; }
 .member-photo img{ width:100%; height:100%; object-fit:cover; display:block; }
 .member-info{
   /* Responsive right-side: allow to shrink to available space and avoid forcing horizontal scroll */
@@ -672,8 +672,7 @@ table.aligned{ table-layout:fixed; margin-bottom:40px; }
   display:grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 10px; /* uniform spacing between buttons */
-  margin: 0; /* rely on card padding for bottom spacing */
-  margin-top:auto; /* push actions to align with bottom of photo */
+  margin: 0 0 28px 0;
 }
 /* Buttons fill their grid cell; height matches back/logout (44px via .primary-btn/.back-btn) */
 .member-actions .primary-btn,
