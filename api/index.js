@@ -1003,8 +1003,13 @@ app.get('/members/search', async (req, res) => {
 app.post('/members/create', requireAuth, async (req, res) => {
   if (!adminReady) return res.status(501).json({ ok: false, error: 'firebase-admin not configured' });
   const payload = req.body || {};
-  const nickRaw = String(payload.NickName || payload.nickName || payload.nickname || payload.Nick || '').trim();
-  if (!nickRaw) return res.status(400).json({ ok: false, error: 'NickName required' });
+  const nickRawInput = String(payload.NickName || payload.nickName || payload.nickname || payload.Nick || '').trim();
+  if (!nickRawInput) return res.status(400).json({ ok: false, error: 'NickName required' });
+  // Rules: max 10 chars, letters/numbers and '-' only, no spaces.
+  if (/\s/.test(nickRawInput)) return res.status(400).json({ ok: false, error: "NickName cannot contain spaces" });
+  if (nickRawInput.length > 10) return res.status(400).json({ ok: false, error: "NickName must be at most 10 characters" });
+  if (!/^[A-Za-z0-9-]+$/.test(nickRawInput)) return res.status(400).json({ ok: false, error: "NickName can only contain letters, numbers, and '-'" });
+  const nickRaw = nickRawInput.toUpperCase();
   const nickLower = nickRaw.toLowerCase();
 
   try {
@@ -1119,8 +1124,12 @@ app.post('/api/upload-photo', async (req, res) => {
 
 // GET /members/check?nick=...  -> { exists: true|false }
 app.get('/members/check', async (req, res) => {
-  const nickRaw = String(req.query.nick || '').trim();
-  if (!nickRaw) return res.status(400).json({ error: 'nick query param required' });
+  const nickRawInput = String(req.query.nick || '').trim();
+  if (!nickRawInput) return res.status(400).json({ error: 'nick query param required' });
+  if (/\s/.test(nickRawInput)) return res.status(400).json({ error: 'nick cannot contain spaces' });
+  if (nickRawInput.length > 10) return res.status(400).json({ error: 'nick must be at most 10 characters' });
+  if (!/^[A-Za-z0-9-]+$/.test(nickRawInput)) return res.status(400).json({ error: "nick can only contain letters, numbers, and '-'" });
+  const nickRaw = nickRawInput.toUpperCase();
   const nickLower = nickRaw.toLowerCase();
   if (!adminReady) {
     // If admin not configured, conservatively return false so local dev isn't blocked.

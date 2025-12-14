@@ -35,6 +35,18 @@ export default function AddMemberModal({ open, onClose, onSaved }) {
   const brgyOptions = getBarangays(form.municipality);
   const navigate = useNavigate();
 
+  const sanitizeNick = (v) => {
+    const raw = String(v || "");
+    const head = raw.split(/\s+/)[0] || ""; // remove spaces and everything after first space
+    const cleaned = head.replace(/[^A-Za-z0-9-]/g, "");
+    return cleaned.toUpperCase().slice(0, 10);
+  };
+
+  const isValidNick = (v) => {
+    const s = String(v || "").trim();
+    return /^[A-Za-z0-9-]{1,10}$/.test(s);
+  };
+
   useEffect(() => {
     if (!open) {
       // reset form when closed
@@ -70,6 +82,11 @@ export default function AddMemberModal({ open, onClose, onSaved }) {
     if (name === "municipality") {
       // Reset barangay when municipality changes
       setForm((s) => ({ ...s, municipality: value, brgy: "" }));
+      return;
+    }
+    if (name === "nickName") {
+      const next = sanitizeNick(value);
+      setForm((s) => ({ ...s, nickName: next }));
       return;
     }
     setForm((s) => ({ ...s, [name]: value }));
@@ -109,8 +126,9 @@ export default function AddMemberModal({ open, onClose, onSaved }) {
     setBusy(true);
     setErr("");
     try {
-      const nickUp = String(form.nickName || "").trim().toUpperCase();
+      const nickUp = sanitizeNick(form.nickName);
       if (!nickUp) throw new Error("Nick Name is required");
+      if (!isValidNick(nickUp)) throw new Error("Nick Name must be 1-10 characters (A-Z, 0-9, '-') and no spaces");
       // Server-side check to avoid uploading photo if nickname already taken.
       try {
         const checkRes = await fetch(`/api/members/check?nick=${encodeURIComponent(nickUp)}`);
@@ -229,7 +247,18 @@ export default function AddMemberModal({ open, onClose, onSaved }) {
             <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 160px', gap: 12, alignItems: 'end' }}>
               <div className="field" style={{ margin: 0 }}>
                 <label className="label">Nick Name *</label>
-                <input name="nickName" value={form.nickName} onChange={onChange} required disabled={busy} />
+                <input
+                  name="nickName"
+                  value={form.nickName}
+                  onChange={onChange}
+                  required
+                  disabled={busy}
+                  maxLength={10}
+                  inputMode="text"
+                  autoCapitalize="characters"
+                  pattern="[A-Za-z0-9-]{1,10}"
+                  title="Max 10 chars. Letters/numbers and '-' only. No spaces."
+                />
               </div>
               <div className="field" style={{ margin: 0 }}>
                 <label className="label">Valid ID *</label>

@@ -66,6 +66,18 @@ export default function EditMemberModal({ open, onClose, member, onSaved }) {
   // Dependent barangay list based on selected municipality
   const brgyOptions = getBarangays(form.municipality);
 
+  const sanitizeNick = (v) => {
+    const raw = String(v || "");
+    const head = raw.split(/\s+/)[0] || "";
+    const cleaned = head.replace(/[^A-Za-z0-9-]/g, "");
+    return cleaned.toUpperCase().slice(0, 10);
+  };
+
+  const isValidNick = (v) => {
+    const s = String(v || "").trim();
+    return /^[A-Za-z0-9-]{1,10}$/.test(s);
+  };
+
   // Drive helpers for reliable preview
   const driveId = (u) => {
     const s = String(u || "");
@@ -304,13 +316,16 @@ export default function EditMemberModal({ open, onClose, member, onSaved }) {
     if (!existingId) { setErr("Missing MemberID"); return; }
     // debug marker to surface start of save
     try { console.debug('[EditMemberModal] save() starting for', existingId); } catch(e) {}
+    const nickUp = sanitizeNick(form.nickName);
     // Build optimistic payload from current form (use existingPhotoUrl for now)
     const optimisticPayload = {
       MemberID: existingId,
       LastName: form.lastName.trim(),
       FirstName: form.firstName.trim(),
       MiddleName: form.middleName.trim(),
-      NickName: String(form.nickName || "").trim().toUpperCase(),
+      // Prefer normalized nickname (10 chars, A-Z/0-9/'-' only, no spaces). If it sanitizes to empty,
+      // fall back to the existing value so editing other fields isn't blocked for legacy data.
+      NickName: nickUp || String(form.nickName || "").trim().toUpperCase(),
       Gender: form.gender,
       Birthday: form.birthday || "",
       Street: form.street.trim(),
