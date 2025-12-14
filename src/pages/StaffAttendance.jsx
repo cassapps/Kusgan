@@ -150,22 +150,25 @@ export default function StaffAttendance() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  // Helper: determine if a staff is currently signed in for today
-  const isSignedInToday = (name) => {
+  // Helper: staff already clocked in today (regardless of clock-out)
+  const hasClockedInToday = (name) => {
     if (!name) return false;
-    const key = String(name).trim().toLowerCase();
+    const key = String(name).trim().toLowerCase().replace(/\s+/g, '');
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: MANILA_TZ }).format(new Date());
     for (const r of rows || []) {
       try {
-        const staff = String(r?.Staff || r?.staff || r?.staff_name || '').trim().toLowerCase();
+        const staff = String(r?.Staff || r?.staff || r?.staff_name || '').trim().toLowerCase().replace(/\s+/g, '');
         const dateStr = rowDateYMD(r) || '';
         const tin = String(r?.TimeIn || r?.time_in || r?.timein || '').trim();
-        const tout = String(r?.TimeOut || r?.time_out || r?.timeout || '').trim();
-        const noOut = tout === '' || tout === '-' || tout === '—' || tout === null || typeof tout === 'undefined';
-        if (staff === key && dateStr === today && tin && noOut) return true;
+        if (staff === key && dateStr === today && tin) return true;
       } catch (e) { /* ignore */ }
     }
     return false;
+  };
+
+  const isOpenEntry = (r) => {
+    const tout = String(r?.TimeOut || r?.time_out || r?.timeout || '').trim();
+    return tout === '' || tout === '-' || tout === '—' || tout === 'null' || typeof tout === 'undefined';
   };
 
   const load = async () => {
@@ -203,6 +206,20 @@ export default function StaffAttendance() {
 
   // today's date in YYYY-MM-DD (Manila) to scope 'On' badges to today only
   const todayYMDManila = new Intl.DateTimeFormat('en-CA', { timeZone: MANILA_TZ }).format(new Date());
+
+  const availableStaffForClockIn = useMemo(() => {
+    try {
+      return STAFF.filter((s) => !hasClockedInToday(s));
+    } catch {
+      return STAFF;
+    }
+  }, [rows]);
+
+  // if selection becomes invalid (e.g., they just clocked in), clear it
+  useEffect(() => {
+    if (!selected) return;
+    if (!availableStaffForClockIn.includes(selected)) setSelected('');
+  }, [availableStaffForClockIn, selected]);
 
   // Collapse controls (match Reports UX)
   const [attCollapsed, setAttCollapsed] = useState(true);
@@ -353,20 +370,21 @@ export default function StaffAttendance() {
 
   const coachingPager = useLoadMore(coachingSessions, { initial: 20, step: 20, resetDeps: [selectedCoach, coachPeriodIndex, coachCollapsed, coachingSessions.length] });
 
-  const onClock = async () => {
+  const onClockIn = async () => {
     if (!selected) return;
+    if (hasClockedInToday(selected)) {
+      setSelected('');
+      setError('This staff member already clocked in today.');
+      return;
+    }
     setBusy(true); setError('');
     try {
       // Optimistic local update (so UI is instant)
-      const isOut = isSignedInToday(selected);
       const now = new Date();
       const iso = now.toISOString();
-      const ymd = iso.slice(0, 10);
-      const hhmm = iso.slice(11, 16);
+      const ymd = todayYMDManila;
       const tempId = 'local-' + Date.now();
-      const opt = isOut
-        ? { id: tempId, Staff: selected, staff_name: selected, Date: ymd, TimeOut: hhmm, time_out: iso, _localPending: true }
-        : { id: tempId, Staff: selected, staff_name: selected, Date: ymd, TimeIn: hhmm, time_in: iso, status: 'On Duty', _localPending: true };
+      const opt = { id: tempId, Staff: selected, staff_name: selected, Date: ymd, TimeIn: iso, time_in: iso, status: 'On Duty', _localPending: true };
       // update UI + cache
       setRows(prev => [opt, ...((prev || []).filter(r => String(r.id) !== String(opt.id)))]);
       localCache.setCached('attendance', [opt, ...(localCache.getCached('attendance') || [])]);
@@ -374,11 +392,10 @@ export default function StaffAttendance() {
       // Write using the same client helper pattern as gym entries so writes persist
       // to Firestore when configured (same behavior as gymQuickAppend).
       try {
-        if (!isOut && api && typeof api.attendanceQuickAppend === 'function') {
+        if (api && typeof api.attendanceQuickAppend === 'function') {
           await api.attendanceQuickAppend(selected, {});
-        } else if (api && typeof api.clockIn === 'function' && api && typeof api.clockOut === 'function') {
-          if (isOut) await api.clockOut(selected);
-          else await api.clockIn(selected);
+        } else if (api && typeof api.clockIn === 'function') {
+          await api.clockIn(selected);
         } else {
           // As a final fallback, enqueue the legacy /attendance/kiosk request
           localCache.enqueueWrite({ method: 'POST', path: '/attendance/kiosk', body: { staff_name: selected }, tempId: opt.id, collection: 'attendance' });
@@ -393,10 +410,71 @@ export default function StaffAttendance() {
 
       // Refresh authoritative list (Firestone or server) so UI reflects final persisted rows
       await load();
+      setSelected('');
     } catch (e) {
       console.error('kiosk error', e);
       setError(e?.message || 'Action failed');
     } finally { setBusy(false); }
+  };
+
+  const onClockOut = async (staffName) => {
+    const staff = String(staffName || selected || '').trim();
+    if (!staff) return;
+    setBusy(true); setError('');
+    try {
+      if (api && typeof api.clockOut === 'function') {
+        await api.clockOut(staff);
+      } else {
+        localCache.enqueueWrite({ method: 'POST', path: '/attendance/kiosk', body: { staff_name: staff }, tempId: 'local-out-' + Date.now(), collection: 'attendance' });
+        await localCache.processQueue();
+      }
+      await load();
+    } catch (e) {
+      console.error('clock out error', e);
+      setError(e?.message || 'Clock out failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const todayAttendance = useMemo(() => {
+    try {
+      const today = todayYMDManila;
+      return (rows || []).filter((r) => {
+        const ymd = rowDateYMD(r) || '';
+        const staffName = String(r?.Staff || r?.staff || r?.staff_name || '').trim();
+        const tin = String(r?.TimeIn || r?.time_in || r?.timein || '').trim();
+        return staffName && tin && ymd === today;
+      }).sort((a, b) => {
+        const aKey = String(a?.TimeIn || a?.time_in || '');
+        const bKey = String(b?.TimeIn || b?.time_in || '');
+        return bKey.localeCompare(aKey);
+      });
+    } catch {
+      return [];
+    }
+  }, [rows, todayYMDManila]);
+
+  const computeHours = (r) => {
+    const existing = (typeof r?.TotalHours !== 'undefined' && r?.TotalHours !== null) ? r.TotalHours
+      : (typeof r?.NoOfHours !== 'undefined' && r?.NoOfHours !== null) ? r.NoOfHours
+      : (typeof r?.hours !== 'undefined' && r?.hours !== null) ? r.hours
+      : null;
+    if (existing !== null) return String(existing);
+    try {
+      const tin = r?.time_in || r?.timeIn || r?.TimeIn || null;
+      const tout = r?.time_out || r?.timeOut || r?.TimeOut || null;
+      if (!tin || !tout) return '—';
+      const a = new Date(tin);
+      const b = new Date(tout);
+      if (isNaN(a) || isNaN(b)) return '—';
+      const hrs = (b.getTime() - a.getTime()) / (1000 * 60 * 60);
+      if (!isFinite(hrs) || hrs < 0) return '—';
+      const v = Math.round(hrs * 100) / 100;
+      return String(v);
+    } catch {
+      return '—';
+    }
   };
 
   return (
@@ -404,16 +482,62 @@ export default function StaffAttendance() {
       <h2 className="dashboard-title">Staff Attendance <RefreshBadge show={loading && !busy} /></h2>
       <div className="panel">
         <div className="panel-header">Select Staff Member</div>
+        {error && <div className="small-error">{error}</div>}
+
         <div style={{ display: 'flex', justifyContent: 'center' }}>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', padding: 12 }}>
-            <select value={selected} onChange={e => setSelected(e.target.value)} style={{ width: 300, height: 44, padding: '8px 12px', border: '1px solid #e7e8ef', borderRadius: 10, fontSize: 18 }}>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', padding: 12, flexWrap: 'wrap' }}>
+            <select value={selected} onChange={e => setSelected(e.target.value)} style={{ width: 300, height: 44, padding: '8px 12px', border: '1px solid #e7e8ef', borderRadius: 10, fontSize: 16 }}>
               <option value="">(choose)</option>
-              {STAFF.map(s => <option key={s} value={s}>{s}</option>)}
+              {availableStaffForClockIn.length === 0 ? (
+                <option value="" disabled>All staff already clocked in today</option>
+              ) : (
+                availableStaffForClockIn.map(s => <option key={s} value={s}>{s}</option>)
+              )}
             </select>
-            <button className="primary-btn" onClick={onClock} disabled={!selected || busy}>
-              {busy ? 'Processing…' : (selected && isSignedInToday(selected) ? 'Sign Out' : 'Sign In')}
+            <button className="primary-btn" onClick={onClockIn} disabled={!selected || busy || availableStaffForClockIn.length === 0}>
+              {busy ? 'Processing…' : 'Clock In'}
             </button>
           </div>
+        </div>
+
+        <div style={{ overflowX: 'auto', padding: 8 }}>
+          <table className="attendance-table aligned" style={{ width: '100%' }}>
+            <thead>
+              <tr>
+                <th>Staff</th>
+                <th>Time In</th>
+                <th>Time Out</th>
+                <th style={{ textAlign: 'center' }}>Total Hours</th>
+                <th style={{ textAlign: 'center' }}>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {todayAttendance.length === 0 ? (
+                <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--muted)' }}>No attendance records for today.</td></tr>
+              ) : todayAttendance.map((r, i) => {
+                const staffName = String(r?.Staff || r?.staff || r?.staff_name || '').trim();
+                const tin = displayTime(r);
+                const toutIso = r?.time_out || r?.TimeOut || r?.timeOut || '';
+                const tout = toutIso ? (toutIso.length === 5 ? displayTime({ TimeIn: toutIso }) : fmtTime(toutIso)) : '—';
+                const open = isOpenEntry(r);
+                return (
+                  <tr key={(String(r?.id || '') || (todayYMDManila + '|' + staffName + '|' + i))}>
+                    <td style={{ fontWeight: 700 }}>{staffName}</td>
+                    <td>{tin}</td>
+                    <td>{tout}</td>
+                    <td style={{ textAlign: 'center' }}>{computeHours(r)}</td>
+                    <td style={{ textAlign: 'center' }}>
+                      {open ? (
+                        <button className="button" type="button" disabled={busy} onClick={() => onClockOut(staffName)}>
+                          Clock Out
+                        </button>
+                      ) : '—'}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -437,7 +561,7 @@ export default function StaffAttendance() {
             </select>
           </div>
         </div>
-        {error && <div className="small-error">{error}</div>}
+        {/* error shown in top panel */}
         {!attCollapsed && (
           <>
             <div style={{ overflowX: 'auto', padding: 8 }}>
