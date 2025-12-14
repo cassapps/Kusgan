@@ -534,10 +534,10 @@ export default function Dashboard() {
       .sort((a, b) => (parseTs(candidates(b)) || 0) - (parseTs(candidates(a)) || 0));
 
     return todays.map((p, idx) => {
+      const paymentMemberId = String(p.MemberID || p.member_id || p.id || p.member || '').trim();
       const member = (members || []).find(m => {
-        const pid = String(p.MemberID || p.member_id || p.id || p.member || '').trim();
-        if (!pid) return false;
-        return String(m.MemberID || m.member_id || m.id || '').trim() === pid;
+        if (!paymentMemberId) return false;
+        return String(m.MemberID || m.member_id || m.id || '').trim() === paymentMemberId;
       });
       const pills = member ? getMemberPills(member) : [];
       const gymValidRaw = p.gymvaliduntil || p.GymValidUntil || p.gym_valid_until || p.gym_until || p.EndDate || p.Enddate || p.enddate || p.end_date || p.end || p.valid_until || p.expiry || p.expires || p.until || '';
@@ -546,7 +546,16 @@ export default function Dashboard() {
       const coachValid = fmtDate(coachValidRaw);
 
       return (
-        <tr key={idx}>
+        <tr
+          key={idx}
+          className={paymentMemberId ? 'row-link' : undefined}
+          style={{ cursor: paymentMemberId ? 'pointer' : 'default' }}
+          onClick={() => {
+            if (!paymentMemberId) return;
+            try { setOpenPaymentsModal(false); } catch (e) {}
+            navigate(`/members/${encodeURIComponent(paymentMemberId)}`, { state: { row: member || { MemberID: paymentMemberId } } });
+          }}
+        >
           <td>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
               <span>{displayName(member)}</span>
@@ -565,7 +574,7 @@ export default function Dashboard() {
         </tr>
       );
     });
-  }, [useFirestore, paymentsToday, payments, members, paymentsModalKind, selectedYmd]);
+  }, [useFirestore, paymentsToday, payments, members, paymentsModalKind, selectedYmd, navigate]);
 
   const paymentsModalPager = useLoadMore(paymentRowsForModal, { initial: 20, step: 20, resetDeps: [openPaymentsModal, paymentsModalKind] });
   const gymEntriesPager = useLoadMore(gymEntryRows, { initial: 20, step: 20, resetDeps: [gymEntryRows?.length] });

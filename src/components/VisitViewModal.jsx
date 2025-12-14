@@ -163,6 +163,10 @@ export default function VisitViewModal({ open, onClose, row, onCheckout }) {
     return visitY === manilaYMD(new Date());
   }, [dateRaw]);
 
+  const canCheckout = React.useMemo(() => {
+    return (!timeOut && isTodayVisit);
+  }, [timeOut, isTodayVisit]);
+
   // Keep hooks stable even when `open` is false — only short-circuit rendering after hooks
   if (!open) return null;
 
@@ -223,25 +227,42 @@ export default function VisitViewModal({ open, onClose, row, onCheckout }) {
           <div style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 10, padding: 12, fontSize: 16, minHeight: 72 }}>{comments || "-"}</div>
         </div>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
-          {/* Show Check Out if entry has no TimeOut: navigate to Check-In page to use the unified confirm modal */}
-          {(!timeOut && isTodayVisit) ? (
-            <button
-              className="primary-btn"
-              onClick={() => {
-                try {
-                  if (typeof onCheckout === 'function') {
-                    try { onCheckout(r); } catch (e) { console.error(e); }
-                    onClose && onClose();
-                    return;
-                  }
-                  setOpenCheckoutModal(true);
-                } catch (e) { console.error(e); }
-              }}
-            >
-              Check Out
-            </button>
-          ) : null}
-          <button className="primary-btn" onClick={onClose}>Close</button>
+          <button
+            type="button"
+            className="back-btn"
+            disabled={!memberId}
+            title={memberId ? 'Go to member details' : 'Missing member id'}
+            onClick={() => {
+              if (!memberId) return;
+              try { onClose && onClose(); } catch (e) {}
+              navigate(`/members/${encodeURIComponent(String(memberId).trim())}`, { state: { row: { MemberID: String(memberId).trim() } } });
+            }}
+          >
+            Member Details
+          </button>
+
+          <button
+            type="button"
+            className="primary-btn"
+            disabled={!canCheckout}
+            title={canCheckout ? 'Checkout this visit' : 'Checkout is only available for today\'s open visit'}
+            style={!canCheckout ? { opacity: 0.55, cursor: 'not-allowed' } : undefined}
+            onClick={() => {
+              if (!canCheckout) return;
+              try {
+                if (typeof onCheckout === 'function') {
+                  try { onCheckout(r); } catch (e) { console.error(e); }
+                  onClose && onClose();
+                  return;
+                }
+                setOpenCheckoutModal(true);
+              } catch (e) { console.error(e); }
+            }}
+          >
+            Check Out
+          </button>
+
+          <button type="button" className="back-btn" onClick={onClose}>Close</button>
         </div>
       </ModalWrapper>
       {openCheckoutModal && (
