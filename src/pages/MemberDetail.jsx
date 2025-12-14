@@ -24,7 +24,7 @@ import { getMemberPills } from '../lib/discount.js';
 
 const toKey = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, "_");
 const norm = (row) => Object.fromEntries(Object.entries(row || {}).map(([k, v]) => [toKey(k), v]));
-const firstOf = (o, ks) => ks.map((k) => o[k]).find((v) => v !== undefined && v !== "");
+const firstOf = (o, ks) => ks.map((k) => (o || {})[k]).find((v) => v !== undefined && v !== "");
 const asDate = (v) => {
   if (!v && v !== 0) return null;
   // Firestore Timestamp objects have a toDate() helper
