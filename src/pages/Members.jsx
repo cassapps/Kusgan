@@ -586,8 +586,8 @@ export default function Members() {
                       <th style={{ textAlign: 'center' }}>Full Name</th>
                       <th style={{ textAlign: 'center' }}>Member Since</th>
                       <th style={{ textAlign: 'center' }}>Last Gym Visit</th>
-                      <th style={{ textAlign: 'center' }}>Gym Valid Until</th>
-                      <th style={{ textAlign: 'center' }}>Coach Valid Until</th>
+                      <th style={{ textAlign: 'center' }}>Gym Valid<br /><span className="th-sub">Until</span></th>
+                      <th style={{ textAlign: 'center' }}>Coach Valid<br /><span className="th-sub">Until</span></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -651,8 +651,8 @@ export default function Members() {
                   <div style={{ width: '25%', textAlign: 'center' }}>Full Name</div>
                   <div style={{ width: '15%', textAlign: 'center' }}>Member Since</div>
                   <div style={{ width: '15%', textAlign: 'center' }}>Last Gym Visit</div>
-                  <div style={{ width: '15%', textAlign: 'center' }}>Gym Valid Until</div>
-                  <div style={{ width: '15%', textAlign: 'center' }}>Coach Valid Until</div>
+                  <div style={{ width: '15%', textAlign: 'center' }}>Gym Valid<br /><span className="th-sub">Until</span></div>
+                  <div style={{ width: '15%', textAlign: 'center' }}>Coach Valid<br /><span className="th-sub">Until</span></div>
                 </div>
                 <List
                   height={Math.min(listHeight, Math.max(200, membersPager.visible.length * 56))}

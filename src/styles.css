@@ -394,6 +394,19 @@ td{ text-align:center; vertical-align:middle; }
   }
 }
 
+/* ---------- Responsive dropdowns (iPad) ---------- */
+/* iOS renders native select menus; reduce font-size on iPad widths but keep >=16px on phones to avoid zoom. */
+@media (max-width: 1024px) and (min-width: 600px){
+  select,
+  .big-select,
+  .att-select-input,
+  .field select,
+  .member-picker select{
+    font-size: 14px;
+  }
+  option{ font-size: 14px; }
+}
+
 /* Extra-tight for very small screens */
 @media (max-width: 768px){
   table{ min-width: 680px; }
@@ -462,6 +475,16 @@ table.aligned{ table-layout:fixed; margin-bottom:40px; }
 /* Payments table header styling */
 .payments-table thead th{ text-align:center; vertical-align:middle; }
 .payments-table thead th .th-sub{
+  display:block;
+  font-size:12px;
+  color:var(--muted);
+  font-weight:600;
+  line-height:1.1;
+  margin-top:2px;
+}
+
+/* Generic two-line table header helper (used outside payments-table too) */
+.th-sub{
   display:block;
   font-size:12px;
   color:var(--muted);
