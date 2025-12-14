@@ -37,12 +37,24 @@ function todayYMD() {
   }).format(now);
 }
 
+function shiftManilaYMD(ymd, deltaDays) {
+  try {
+    const base = (typeof ymd === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(ymd)) ? ymd : todayYMD();
+    const d = new Date(`${base}T00:00:00+08:00`);
+    d.setUTCDate(d.getUTCDate() + (Number(deltaDays) || 0));
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+  } catch (e) {
+    return ymd;
+  }
+}
+
 // Keep local name firstOf for earlier usage but delegate to shared visit util
 const firstOf = (o, ks) => firstOfVisit(o, ks);
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const useFirestore = String(import.meta.env.VITE_USE_FIRESTORE ?? 'true') === 'true';
+  const [selectedYmd, setSelectedYmd] = useState(() => todayYMD());
   // state/hooks
   const [stats, setStats] = useState({
     totalMembers: 0,
@@ -130,11 +142,22 @@ export default function Dashboard() {
     }
   };
 
-  const isDateActive = (v) => {
+  const isDateActive = (v, asOfYmd) => {
     const endYMD = manilaYMD(v);
     if (!endYMD) return false;
-    return endYMD >= todayYMD();
+    const ref = (typeof asOfYmd === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(asOfYmd)) ? asOfYmd : todayYMD();
+    return endYMD >= ref;
   };
+
+  const dateOptions = useMemo(() => {
+    const today = todayYMD();
+    const out = [];
+    for (let i = 0; i < 7; i++) {
+      const ymd = shiftManilaYMD(today, -i);
+      out.push({ ymd, label: i === 0 ? `${ymd} (Today)` : ymd });
+    }
+    return out;
+  }, []);
 
   const resolveMemberId = (m) => String(m?.MemberID || m?.member_id || m?.memberid || m?.memberId || m?.id || '').trim();
   const resolveNick = (m) => String(m?.NickName || m?.nick_name || m?.nickname || m?.nickName || '').trim();
@@ -188,6 +211,7 @@ export default function Dashboard() {
 
   const activeMembers = useMemo(() => {
     try {
+      const asOf = (typeof selectedYmd === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(selectedYmd)) ? selectedYmd : todayYMD();
       const pick = (o, keys) => {
         for (const k of keys) {
           if (o && Object.prototype.hasOwnProperty.call(o, k)) return o[k];
@@ -207,7 +231,7 @@ export default function Dashboard() {
           ? (activePaymentsByMember.get(memberId) || [])
           : (paymentsByMember.get(memberId) || []);
 
-        const st0 = computeStatusForMember(pays, m, pricing || []);
+        const st0 = computeStatusForMember(pays, m, pricing || [], asOf);
         const gymUntil = st0?.membershipEnd ?? pick(m, [
           'membershipEnd','membership_end','gymvaliduntil','gym_valid_until','gym_until','enddate','end_date','valid_until','expiry','expires','until','end','gym_valid','gym_validity','gymvalid'
         ]);
@@ -218,8 +242,8 @@ export default function Dashboard() {
         const membershipState = String(m?.membershipState || m?.membership_state || m?.status || '').trim().toLowerCase();
         const coachState = String(m?.coachState || m?.coach_state || '').trim().toLowerCase();
 
-        const gymActive = (st0?.membershipState === 'active') || (membershipState === 'active') || isDateActive(gymUntil);
-        const coachActive = (st0?.coachActive === true) || (coachState === 'active') || isDateActive(coachUntil);
+        const gymActive = (st0?.membershipState === 'active') || (membershipState === 'active') || isDateActive(gymUntil, asOf);
+        const coachActive = (st0?.coachActive === true) || (coachState === 'active') || isDateActive(coachUntil, asOf);
 
         const st = {
           ...(st0 || {}),
@@ -236,7 +260,7 @@ export default function Dashboard() {
     } catch (e) {
       return { gym: [], coach: [] };
     }
-  }, [useFirestore, members, paymentsByMember, activePaymentsByMember, pricing, isDateActive]);
+  }, [useFirestore, members, paymentsByMember, activePaymentsByMember, pricing, selectedYmd]);
 
   const openActiveList = (kind) => {
     setActiveModalKind(kind);
@@ -245,10 +269,11 @@ export default function Dashboard() {
 
   // Generate gym entry rows (computed after state is declared to avoid TDZ)
   const gymEntryRows = useMemo(() => {
+    const asOf = (typeof selectedYmd === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(selectedYmd)) ? selectedYmd : todayYMD();
     const todays = (gymEntries || []).filter(e => {
       const d = e.Date || e.date;
-      const ymd = d ? new Date(d).toLocaleDateString("en-CA", { year: "numeric", month: "2-digit", day: "2-digit" }) : "";
-      return ymd === todayYMD();
+      const ymd = manilaYMD(d) || '';
+      return ymd === asOf;
     });
     // Sort: open entries (missing TimeOut) first, then by TimeIn descending
     todays.sort((a, b) => {
@@ -294,10 +319,11 @@ export default function Dashboard() {
       </tr>
     );
     });
-  }, [gymEntries, members]);
+  }, [gymEntries, members, selectedYmd]);
 
   // Helper: compute stats from fetched arrays (returns stats object)
-  const computeStatsFromData = (membersArr, paymentsArr, gymArr, pricingArr) => {
+  const computeStatsFromData = (membersArr, paymentsArr, gymArr, pricingArr, asOfYmd) => {
+    const asOf = (typeof asOfYmd === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(asOfYmd)) ? asOfYmd : todayYMD();
     const pricingFlags = new Map();
     const truthy = (v) => { const s = String(v ?? "").trim().toLowerCase(); return s === "yes" || s === "y" || s === "true" || s === "1"; };
     const pick = (o, keys) => { for (const k of keys) { if (o && Object.prototype.hasOwnProperty.call(o, k)) return o[k]; const alt = Object.keys(o || {}).find((kk) => kk.toLowerCase().replace(/\s+/g, "") === k.toLowerCase().replace(/\s+/g, "")); if (alt) return o[alt]; } return undefined; };
@@ -324,7 +350,7 @@ export default function Dashboard() {
     for (const m of (membersArr || [])) {
       const id = String(m.MemberID || m.member_id || m.id || "").trim();
       const pays = paymentsByMember.get(id) || [];
-      const st = computeStatusForMember(pays, m, pricingArr);
+      const st = computeStatusForMember(pays, m, pricingArr, asOf);
       // Fallback: if payments don't indicate an active membership, check member-level fields
       if (st.membershipState !== 'active') {
         const memberState = (m.membershipState || m.membership_state || m.status || "").toLowerCase();
@@ -333,12 +359,8 @@ export default function Dashboard() {
         } else {
           const memberGymUntil = pick(m, ["membershipEnd","membership_end","gymvaliduntil","gym_valid_until","gym_until","enddate","end_date","valid_until","expiry","expires","until","end","gym_valid","gym_validity","gymvalid"]);
           if (memberGymUntil) {
-            const g = new Date(memberGymUntil);
-            if (!isNaN(g)) {
-              g.setHours(0,0,0,0);
-              const today2 = new Date(); today2.setHours(0,0,0,0);
-              if (g >= today2) st.membershipState = 'active';
-            }
+            const gy = manilaYMD(memberGymUntil);
+            if (gy && gy >= asOf) st.membershipState = 'active';
           }
         }
       }
@@ -346,12 +368,11 @@ export default function Dashboard() {
       if (st.coachActive) activeCoach++;
     }
 
-    const today = todayYMD();
     const visitsToday = (gymArr || []).filter(e => {
       const d = e.Date || e.date;
       if (!d) return false;
-      const s = new Date(d).toLocaleDateString('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' });
-      return s === today;
+      const s = manilaYMD(d);
+      return s === asOf;
     });
     const uniqueVisited = new Set(visitsToday.map(e => String(e.MemberID || e.member_id || e.id || "").trim()).filter(Boolean));
     const visitedToday = uniqueVisited.size;
@@ -379,8 +400,8 @@ export default function Dashboard() {
     for (const p of (paymentsArr || [])) {
       const d = p.Date || p.date || p.pay_date;
       if (!d) continue;
-      const ymd = new Date(d).toLocaleDateString('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' });
-      if (ymd !== today) continue;
+      const ymd = manilaYMD(d);
+      if (ymd !== asOf) continue;
       const amt = parseFloat(p.Cost || p.amount || 0) || 0;
       totalPaymentsToday += amt;
       const mode = String(p.Mode || p.mode || p.method || "").toLowerCase();
@@ -392,7 +413,7 @@ export default function Dashboard() {
   };
   const paymentRowsForModal = useMemo(() => {
     const base = useFirestore ? (paymentsToday || []) : (payments || []);
-    const today = todayYMD();
+    const asOf = (typeof selectedYmd === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(selectedYmd)) ? selectedYmd : todayYMD();
     const candidates = (p) => p.timestamp || p.created || p.paid_on || p.createdAt || p.date || p.Date || p.pay_date || null;
     const parseTs = (v) => {
       if (!v && v !== 0) return 0;
@@ -425,7 +446,7 @@ export default function Dashboard() {
     };
 
     const todays = (base || [])
-      .filter(p => ymdOf(candidates(p)) === today)
+      .filter(p => ymdOf(candidates(p)) === asOf)
       .filter(filterByKind)
       .sort((a, b) => (parseTs(candidates(b)) || 0) - (parseTs(candidates(a)) || 0));
 
@@ -451,7 +472,7 @@ export default function Dashboard() {
         </tr>
       );
     });
-  }, [useFirestore, paymentsToday, payments, members, paymentsModalKind]);
+  }, [useFirestore, paymentsToday, payments, members, paymentsModalKind, selectedYmd]);
 
   const paymentsModalPager = useLoadMore(paymentRowsForModal, { initial: 20, step: 20, resetDeps: [openPaymentsModal, paymentsModalKind] });
   const gymEntriesPager = useLoadMore(gymEntryRows, { initial: 20, step: 20, resetDeps: [gymEntryRows?.length] });
@@ -466,71 +487,77 @@ export default function Dashboard() {
 
 
   useEffect(() => {
-    if (useFirestore) {
-      let alive = true;
-      let unsubMembers = null;
-      let unsubGym = null;
-      let unsubPayToday = null;
-      let unsubPayActive = null;
+    if (!useFirestore) return;
+    let alive = true;
+    let unsubMembers = null;
+    let unsubGym = null;
+    let unsubPayToday = null;
+    let unsubPayActive = null;
 
-      setLoading(true);
-      setIsRefreshing(true);
+    setLoading(true);
+    setIsRefreshing(true);
 
-      // Pricing is small; just fetch once.
-      (async () => {
-        try {
-          const pr = await fetchPricing();
-          if (!alive) return;
-          setPricing(pr?.rows || pr?.data || []);
-        } catch (e) { /* ignore */ }
-      })();
-
-      const today = todayYMD();
-
+    // Pricing is small; just fetch once.
+    (async () => {
       try {
-        unsubMembers = listenMembers((rows) => {
-          if (!alive) return;
-          setMembers(rows || []);
-        }, () => {});
+        const pr = await fetchPricing();
+        if (!alive) return;
+        setPricing(pr?.rows || pr?.data || []);
       } catch (e) { /* ignore */ }
+    })();
 
-      try {
-        unsubGym = listenGymEntriesForDate(today, (rows) => {
-          if (!alive) return;
-          setGymEntries(rows || []);
-        }, () => {});
-      } catch (e) { /* ignore */ }
+    const asOf = (typeof selectedYmd === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(selectedYmd)) ? selectedYmd : todayYMD();
 
-      try {
-        unsubPayToday = listenPaymentsForDate(today, (rows) => {
-          if (!alive) return;
-          setPaymentsToday(rows || []);
-        }, () => {});
-      } catch (e) { /* ignore */ }
+    try {
+      unsubMembers = listenMembers((rows) => {
+        if (!alive) return;
+        setMembers(rows || []);
+      }, () => {});
+    } catch (e) { /* ignore */ }
 
-      try {
-        unsubPayActive = listenPaymentsActive((rows) => {
-          if (!alive) return;
-          setPaymentsActive(rows || []);
-        }, () => {});
-      } catch (e) { /* ignore */ }
+    try {
+      unsubGym = listenGymEntriesForDate(asOf, (rows) => {
+        if (!alive) return;
+        setGymEntries(rows || []);
+      }, () => {});
+    } catch (e) { /* ignore */ }
 
-      setLoading(false);
-      setIsRefreshing(false);
+    try {
+      unsubPayToday = listenPaymentsForDate(asOf, (rows) => {
+        if (!alive) return;
+        setPaymentsToday(rows || []);
+      }, () => {});
+    } catch (e) { /* ignore */ }
 
-      return () => {
-        alive = false;
-        try { unsubMembers && unsubMembers(); } catch (e) {}
-        try { unsubGym && unsubGym(); } catch (e) {}
-        try { unsubPayToday && unsubPayToday(); } catch (e) {}
-        try { unsubPayActive && unsubPayActive(); } catch (e) {}
-      };
-    }
+    try {
+      unsubPayActive = listenPaymentsActive((rows) => {
+        if (!alive) return;
+        setPaymentsActive(rows || []);
+      }, () => {});
+    } catch (e) { /* ignore */ }
+
+    setLoading(false);
+    setIsRefreshing(false);
+
+    return () => {
+      alive = false;
+      try { unsubMembers && unsubMembers(); } catch (e) {}
+      try { unsubGym && unsubGym(); } catch (e) {}
+      try { unsubPayToday && unsubPayToday(); } catch (e) {}
+      try { unsubPayActive && unsubPayActive(); } catch (e) {}
+    };
+  }, [useFirestore, selectedYmd]);
+
+  useEffect(() => {
+    if (useFirestore) return;
 
     async function loadStats() {
   setLoading(true);
   // Try server-side aggregate first for fastest dashboard render
       try {
+        const asOf = (typeof selectedYmd === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(selectedYmd)) ? selectedYmd : todayYMD();
+        const today = todayYMD();
+        if (asOf !== today) throw new Error('skip server dashboard for non-today date');
         const dashRes = await fetchDashboard();
         if (dashRes && dashRes.ok) {
           const { totalMembers=0, activeGym=0, activeCoach=0, visitedToday=0, coachToday=0, checkedIn=0, cashToday=0, gcashToday=0, totalPaymentsToday=0 } = dashRes;
@@ -553,7 +580,8 @@ export default function Dashboard() {
                   membersRes?.rows || membersRes?.data || [],
                   paymentsRes?.rows || paymentsRes?.data || [],
                   gymRes?.rows || gymRes?.data || [],
-                  pricingRes?.rows || pricingRes?.data || []
+                  pricingRes?.rows || pricingRes?.data || [],
+                  asOf
                 );
                 setStats(computed);
               } catch (e) {
@@ -596,108 +624,15 @@ export default function Dashboard() {
       setStats((s) => ({ ...s, totalMembers: membersArr.length }));
       // allow browser to render before heavy compute
       setTimeout(() => {
-        // Build pricing flags map once
-        const pricingFlags = new Map();
-        const truthy = (v) => { const s = String(v ?? "").trim().toLowerCase(); return s === "yes" || s === "y" || s === "true" || s === "1"; };
-        const pick = (o, keys) => { for (const k of keys) { if (o && Object.prototype.hasOwnProperty.call(o, k)) return o[k]; const alt = Object.keys(o || {}).find((kk) => kk.toLowerCase().replace(/\s+/g, "") === k.toLowerCase().replace(/\s+/g, "")); if (alt) return o[alt]; } return undefined; };
-        pricingArr.forEach(r => {
-          const name = String(pick(r, ["Particulars"]) || "").trim();
-          if (!name) return;
-          const gymFlag = truthy(pick(r, ["Gym membership","Gym Membership","GymMembership","Membership"]));
-          const coachFlag = truthy(pick(r, ["Coach subscription","Coach Subscription","CoachSubscription","Coach"]));
-          pricingFlags.set(name.toLowerCase(), { gym: gymFlag, coach: coachFlag });
-        });
-
-        // Group payments by member id to avoid N*M filters
-        const paymentsByMember = new Map();
-        paymentsArr.forEach(p => {
-          const id = String(p.MemberID || p.member_id || p.id || p.member || "").trim();
-          if (!id) return;
-          if (!paymentsByMember.has(id)) paymentsByMember.set(id, []);
-          paymentsByMember.get(id).push(p);
-        });
-
-        // use shared computeStatusForMember helper (imported at top)
-
-        // Compute member-level stats with linear passes
-        let activeGym = 0, activeCoach = 0;
-        for (const m of membersArr) {
-          const id = String(m.MemberID || m.member_id || m.id || "").trim();
-          const pays = paymentsByMember.get(id) || [];
-          const st = computeStatusForMember(pays, m, pricingArr);
-          // Fallback to member-level fields if payments didn't indicate active
-          if (st.membershipState !== 'active') {
-            const memberState = (m.membershipState || m.membership_state || m.status || "").toLowerCase();
-            if (memberState === 'active') {
-              st.membershipState = 'active';
-            } else {
-              const memberGymUntil = pick(m, ["membershipEnd","membership_end","gymvaliduntil","gym_valid_until","gym_until","enddate","end_date","valid_until","expiry","expires","until","end","gym_valid","gym_validity","gymvalid"]);
-              if (memberGymUntil) {
-                const g = new Date(memberGymUntil);
-                if (!isNaN(g)) {
-                  g.setHours(0,0,0,0);
-                  const today2 = new Date(); today2.setHours(0,0,0,0);
-                  if (g >= today2) st.membershipState = 'active';
-                }
-              }
-            }
-          }
-          if (st.membershipState === 'active') activeGym++;
-          if (st.coachActive) activeCoach++;
+        try {
+          const computed = computeStatsFromData(membersArr, paymentsArr, gymArr, pricingArr, selectedYmd);
+          setStats(computed);
+        } catch (e) {
+          console.warn('Failed to compute stats', e);
+        } finally {
+          setLoading(false);
+          setShowLoadingToast(false);
         }
-
-        // Visits today (single pass)
-        const today = todayYMD();
-        const visitsToday = [];
-        for (const e of gymArr) {
-          const d = e.Date || e.date;
-          if (!d) continue;
-          const s = new Date(d).toLocaleDateString('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' });
-          if (s === today) visitsToday.push(e);
-        }
-
-        // Member Visits: unique members that have at least one entry today
-        const uniqueVisited = new Set(visitsToday.map(e => String(e.MemberID || e.member_id || e.id || "").trim()).filter(Boolean));
-        const visitedToday = uniqueVisited.size;
-
-        // Coaching Sessions: unique members with a coach selected today
-        const coachedMembers = new Set();
-        for (const e of visitsToday) {
-          const coachValRaw = String(e.Coach || e.coach || '').trim();
-          const coachVal = coachValRaw.toLowerCase();
-          const memberId = String(e.MemberID || e.member_id || e.id || '').trim();
-          const coachSelected = !!coachValRaw && coachVal !== '-' && coachVal !== '—' && coachVal !== 'n/a' && coachVal !== 'na' && coachVal !== 'none';
-          if (coachSelected && memberId) coachedMembers.add(memberId);
-        }
-        const coachToday = coachedMembers.size;
-
-        // Currently Checked-In: unique members who have at least one open entry today (TimeIn present, TimeOut missing)
-        const checkedInSet = new Set();
-        for (const e of visitsToday) {
-          const tin = String(firstOf(e, ["TimeIn","timein","time_in"]) || '').trim();
-          const memberId = String(firstOf(e, ["MemberID","memberid","member_id","id"]) || '').trim();
-          const toutPresent = !isTimeOutMissingRow(e);
-          if (tin && !toutPresent && memberId) checkedInSet.add(memberId);
-        }
-        const checkedIn = checkedInSet.size;
-
-        // Revenue today (single pass over payments)
-        let cashToday = 0, gcashToday = 0, totalPaymentsToday = 0;
-        for (const p of paymentsArr) {
-          const d = p.Date || p.date || p.pay_date;
-          if (!d) continue;
-          const ymd = new Date(d).toLocaleDateString('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' });
-          if (ymd !== today) continue;
-          const amt = parseFloat(p.Cost || p.amount || 0) || 0;
-          totalPaymentsToday += amt;
-          const mode = String(p.Mode || p.mode || p.method || "").toLowerCase();
-          if (mode === 'cash') cashToday += amt;
-          if (mode === 'gcash') gcashToday += amt;
-        }
-
-        setStats({ totalMembers: membersArr.length, activeGym, activeCoach, visitedToday, coachToday, checkedIn, cashToday, gcashToday, totalPaymentsToday });
-    setLoading(false);
-    setShowLoadingToast(false);
       }, 20);
     };
     loadStats();
@@ -729,10 +664,12 @@ export default function Dashboard() {
   useEffect(() => {
     try {
       if (!useFirestore) {
-        const computed = computeStatsFromData(members || [], payments || [], gymEntries || [], pricing || []);
+        const computed = computeStatsFromData(members || [], payments || [], gymEntries || [], pricing || [], selectedYmd);
         setStats(computed);
         return;
       }
+
+      const asOf = (typeof selectedYmd === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(selectedYmd)) ? selectedYmd : todayYMD();
 
       const pick = (o, keys) => {
         for (const k of keys) {
@@ -752,23 +689,26 @@ export default function Dashboard() {
 
         // Prefer payment-derived status when available
         const pays = activePaymentsByMember.get(memberId) || [];
-        const stFromPays = pays.length ? computeStatusForMember(pays, m, pricing || []) : null;
+        const stFromPays = pays.length ? computeStatusForMember(pays, m, pricing || [], asOf) : null;
 
         const membershipState = String(m?.membershipState || m?.membership_state || m?.status || '').trim().toLowerCase();
         const coachState = String(m?.coachState || m?.coach_state || '').trim().toLowerCase();
         const gymUntil = pick(m, ["membershipEnd","membership_end","gymvaliduntil","gym_valid_until","gym_until","enddate","end_date","valid_until","expiry","expires","until","end","gym_valid","gym_validity","gymvalid"]);
         const coachUntil = pick(m, ["coachEnd","coach_end","coach_subscription_end","coach_subscription_end_date","coachvaliduntil","coach_valid_until","coach_until","coach_expiry","coach_expires"]);
 
-        const gymActive = (stFromPays?.membershipState === 'active') || (membershipState === 'active') || isDateActive(gymUntil);
-        const coachActive = (stFromPays?.coachActive === true) || (coachState === 'active') || isDateActive(coachUntil);
+        const gymActive = (stFromPays?.membershipState === 'active') || (membershipState === 'active') || isDateActive(gymUntil, asOf);
+        const coachActive = (stFromPays?.coachActive === true) || (coachState === 'active') || isDateActive(coachUntil, asOf);
         if (gymActive) activeGym++;
         if (coachActive) activeCoach++;
       }
 
-      const visitedToday = (gymEntries || []).filter((e) => {
+      const visitedSet = new Set();
+      for (const e of (gymEntries || [])) {
         const tin = String(firstOf(e, ["TimeIn","timein","time_in"]) || '').trim();
-        return !!tin;
-      }).length;
+        const memberId = String(firstOf(e, ["MemberID","memberid","member_id","id"]) || '').trim();
+        if (tin && memberId) visitedSet.add(memberId);
+      }
+      const visitedToday = visitedSet.size;
 
       // Coaching Sessions: unique members with a coach selected today
       const coachedMembers = new Set();
@@ -815,7 +755,7 @@ export default function Dashboard() {
     } catch (e) {
       console.warn('Failed to recompute stats on data change', e);
     }
-  }, [useFirestore, members, payments, paymentsToday, paymentsActive, gymEntries, pricing, activePaymentsByMember]);
+  }, [useFirestore, members, payments, paymentsToday, paymentsActive, gymEntries, pricing, activePaymentsByMember, selectedYmd]);
 
   // Checkout handler: attempt to close an open gym entry for the given member id.
   const handleCheckout = async (entry, payload = {}) => {
@@ -883,6 +823,23 @@ export default function Dashboard() {
   return (
     <div className="dashboard-content">
       <h2 className="dashboard-title">Daily Dashboard <RefreshBadge show={isRefreshing && !loading} /></h2>
+
+      <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "0 0 24px", flexWrap: "wrap" }}>
+          <select
+            value={selectedYmd}
+            onChange={(e) => setSelectedYmd(e.target.value)}
+            style={{ width: 320, height: 52, padding: "10px 14px", border: "1px solid #e7e8ef", borderRadius: 10, fontSize: 18 }}
+          >
+            {dateOptions.map((opt) => (
+              <option key={opt.ymd} value={opt.ymd}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
         <div className="dashboard-grid-3x3">
           {/* First row */}
           <div className="dashboard-card"><div className="dashboard-label">Total Members</div><div className="dashboard-value magenta">{stats.totalMembers}</div></div>
@@ -952,7 +909,13 @@ export default function Dashboard() {
         <ModalWrapper
           open={openPaymentsModal}
           onClose={() => setOpenPaymentsModal(false)}
-          title={paymentsModalKind === 'cash' ? 'Cash Payments Today' : (paymentsModalKind === 'gcash' ? 'GCash Payments Today' : 'Payments Today')}
+          title={(() => {
+            const asOf = (typeof selectedYmd === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(selectedYmd)) ? selectedYmd : todayYMD();
+            const label = asOf === todayYMD() ? 'Today' : asOf;
+            if (paymentsModalKind === 'cash') return `Cash Payments (${label})`;
+            if (paymentsModalKind === 'gcash') return `GCash Payments (${label})`;
+            return `Payments (${label})`;
+          })()}
         >
           <div style={{ overflowX: 'auto' }}>
             <table className="aligned payments-table" style={{ width: '100%' }}>
@@ -993,7 +956,10 @@ export default function Dashboard() {
         </ModalWrapper>
         {/* Gym Entries Table */}
         <div style={{marginTop:24}} className="panel">
-          <div className="panel-header">Gym Entries Today</div>
+          <div className="panel-header">Gym Entries {(() => {
+            const asOf = (typeof selectedYmd === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(selectedYmd)) ? selectedYmd : todayYMD();
+            return asOf === todayYMD() ? 'Today' : `(${asOf})`;
+          })()}</div>
           <table className="aligned">
             <thead>
               <tr>

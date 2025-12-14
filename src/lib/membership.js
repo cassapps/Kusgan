@@ -26,7 +26,7 @@ const normRow = (row) => {
 // paymentsArray: array of payment rows (can be full set or already filtered)
 // memberOrId: either a member object (will attempt to extract id fields) or a member id string
 // pricingRows: optional pricing rows to infer product flags
-export function computeStatusForMember(paymentsArray, memberOrId, pricingRows = []) {
+export function computeStatusForMember(paymentsArray, memberOrId, pricingRows = [], asOfYMD = null) {
   // Use Manila-only date comparisons: compute YYYY-MM-DD in Asia/Manila
   const manilaYMD = (d) => {
     if (!d) return null;
@@ -34,7 +34,7 @@ export function computeStatusForMember(paymentsArray, memberOrId, pricingRows = 
     if (!date) return null;
     return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
   };
-  const today = manilaYMD(new Date());
+  const today = (typeof asOfYMD === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(asOfYMD)) ? asOfYMD : manilaYMD(new Date());
   let membershipEnd = null, coachEnd = null; // will store Date objects at Manila midnight
   let membershipEndYMD = null, coachEndYMD = null; // store YMD strings for comparisons
 
