@@ -27,6 +27,7 @@ import RefreshBadge from '../components/RefreshBadge.jsx';
 import displayName from '../lib/displayName';
 import ModalWrapper from '../components/ModalWrapper.jsx';
 import { getMemberPills } from '../lib/discount.js';
+import { normalizeNickname } from '../lib/nickname.js';
 import useLoadMore from "../lib/useLoadMore.js";
 import useManilaDayKey from '../lib/useManilaDayKey.js';
 
@@ -222,7 +223,7 @@ export default function Dashboard() {
   }, [useFirestore, listenLatestPayment]);
 
   const resolveMemberId = (m) => String(m?.MemberID || m?.member_id || m?.memberid || m?.memberId || m?.id || '').trim();
-  const resolveNick = (m) => String(m?.NickName || m?.nick_name || m?.nickname || m?.nickName || '').trim();
+  const resolveNick = (m) => normalizeNickname(m?.NickName || m?.nick_name || m?.nickname || m?.nickName || '') || '';
   const resolveFullName = (m) => {
     const full = String(m?.full_name || m?.FullName || m?.fullname || '').trim();
     if (full) return full;

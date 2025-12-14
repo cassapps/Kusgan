@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getMemberById, getMemberProgress } from "../utils/membersStore";
+import { normalizeNickname } from '../lib/nickname.js';
 
 function fmtDate(iso) {
   if (!iso) return "—";
@@ -43,7 +44,7 @@ export default function ProgressDetailPanel({ memberId, entryIndex }) {
   return (
     <div className="content">
       <button className="button back-btn" onClick={() => navigate(-1)}>← Back</button>
-      <h2>{member.nickname || `${member.firstName} ${member.lastName}`}</h2>
+      <h2>{normalizeNickname(member.nickname) || member.nickname || `${member.firstName} ${member.lastName}`}</h2>
       <div className="card" style={{ padding:16 }}>
         <div style={{ fontWeight:800, marginBottom:8 }}>Day {dayNo} — {fmtDate(entry.date)}</div>
         <div>Weight: <b>{entry.weight ?? "—"}</b></div>

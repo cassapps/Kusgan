@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import CheckInConfirmModal from './CheckInConfirmModal';
 import ModalWrapper from "./ModalWrapper";
 import api from "../api";
+import { normalizeNickname } from '../lib/nickname.js';
 const { fetchMemberById, fetchMemberByIdFresh } = api;
 
 // Small helpers copied from ProgressViewModal / MemberDetail
@@ -106,7 +107,7 @@ export default function VisitViewModal({ open, onClose, row, onCheckout }) {
         if (!m) {
           try {
             const rowNick = pick(r, ["NickName", "nickname", "Nick", "nick", "Nick_Name", "Nick Name"]) || pick(row, ["NickName", "nickname", "Nick", "nick", "Nick_Name", "Nick Name"]);
-            if (rowNick) { setNickname(String(rowNick).trim()); return; }
+            if (rowNick) { setNickname(normalizeNickname(String(rowNick).trim()) || String(rowNick).trim()); return; }
             const rf = pick(r, ["FirstName", "firstname", "first_name", "first"]) || pick(row, ["FirstName", "firstname", "first_name", "first"]);
             const rl = pick(r, ["LastName", "lastname", "last_name", "last"]) || pick(row, ["LastName", "lastname", "last_name", "last"]);
             const rfull = ((rf || "").trim() || (rl || "").trim()) ? `${(rf||"").trim()} ${(rl||"").trim()}`.trim() : null;
@@ -119,7 +120,7 @@ export default function VisitViewModal({ open, onClose, row, onCheckout }) {
         // Try common nickname keys from the raw record or canonicalized object
         const raw = m._raw || m;
         const nick = pick(raw, ["NickName", "nickname", "Nick", "nick", "Nick_Name", "Nick Name"]);
-        if (nick) setNickname(String(nick).trim());
+        if (nick) setNickname(normalizeNickname(String(nick).trim()) || String(nick).trim());
         else {
           // fallback to first + last
           const fn = (m.firstname || m.firstName || m.FirstName || "").trim();
@@ -130,7 +131,7 @@ export default function VisitViewModal({ open, onClose, row, onCheckout }) {
           if (!full) {
             try {
               const rowNick = pick(r, ["NickName", "nickname", "Nick", "nick", "Nick_Name", "Nick Name"]) || pick(row, ["NickName", "nickname", "Nick", "nick", "Nick_Name", "Nick Name"]);
-              if (rowNick) { setNickname(String(rowNick).trim()); return; }
+              if (rowNick) { setNickname(normalizeNickname(String(rowNick).trim()) || String(rowNick).trim()); return; }
               const rf = pick(r, ["FirstName", "firstname", "first_name", "first"]) || pick(row, ["FirstName", "firstname", "first_name", "first"]);
               const rl = pick(r, ["LastName", "lastname", "last_name", "last"]) || pick(row, ["LastName", "lastname", "last_name", "last"]);
               const rfull = ((rf || "").trim() || (rl || "").trim()) ? `${(rf||"").trim()} ${(rl||"").trim()}`.trim() : null;

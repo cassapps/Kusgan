@@ -10,6 +10,7 @@ import React, { Suspense } from 'react';
 import { computeStatusForMember } from '../lib/membership';
 import RefreshBadge from '../components/RefreshBadge.jsx';
 import { getMemberPills } from '../lib/discount.js';
+import { normalizeNickname } from '../lib/nickname.js';
 import useLoadMore from "../lib/useLoadMore.js";
 const AddMemberModal = React.lazy(() => import('../components/AddMemberModal.jsx'));
 
@@ -605,7 +606,7 @@ export default function Members() {
                       const first = String(firstOf(r, ["first_name","firstname","first","given_name"]) ?? "");
                       const last = String(firstOf(r, ["last_name","lastname","last","surname"]) ?? "");
                       const fullName = [first, last].filter(Boolean).map(toTitleCase).join(" ");
-                      const nick = String(r.nick_name ?? r.nickname ?? "").toUpperCase();
+                      const nick = normalizeNickname(String(r.nick_name ?? r.nickname ?? ""));
                       const pills = getMemberPills(r);
                       // Example image optimization for member photo
                       // const photoUrl = r.photoUrl || '';
@@ -675,7 +676,7 @@ export default function Members() {
                   const first = String(firstOf(r, ["first_name","firstname","first","given_name"]) ?? "");
                   const last = String(firstOf(r, ["last_name","lastname","last","surname"]) ?? "");
                   const fullName = [first, last].filter(Boolean).map(toTitleCase).join(" ");
-                  const nick = String(r.nick_name ?? r.nickname ?? "").toUpperCase();
+                  const nick = normalizeNickname(String(r.nick_name ?? r.nickname ?? ""));
                   const pills = getMemberPills(r);
                   const memberSince = resolveMemberSince(r) || asDate(firstOf(r, ["member_since","membersince","member_date","memberdate","member_date","createdat","created_at","join_date","joined","start_date"]));
                   return (

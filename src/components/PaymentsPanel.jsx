@@ -4,6 +4,7 @@ import api from "../api";
 import apiClient from '../lib/apiClient';
 import { fmtDateTime } from "../pages/MemberDetail.jsx";
 import useLoadMore from "../lib/useLoadMore.js";
+import { normalizeNickname } from '../lib/nickname.js';
 const { fetchPayments, addPayment, fetchMembers } = api;
 
 const MANILA_TZ = "Asia/Manila";
@@ -121,7 +122,7 @@ export default function PaymentsPanel() {
       // Normalize members to { id, nickname, first, last }
       const mRows = (m?.rows || m?.data || m || []).map((r) => ({
         id: r.MemberID || r.ID || r.Id || r.id || "",
-        nickname: r.Nickname || r.Nick || r.nickname || "",
+        nickname: normalizeNickname(r.Nickname || r.Nick || r.nickname || r.NickName || r.nickName || '') || "",
         first: r.FirstName || r.First || r.GivenName || r.first || "",
         last: r.LastName || r.Last || r.Surname || r.last || "",
       }));

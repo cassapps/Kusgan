@@ -1,5 +1,6 @@
 import React, { useEffect } from "react";
 import { QRCodeSVG } from "qrcode.react";
+import { normalizeNickname } from '../lib/nickname.js';
 
 // Lightweight QR Code Modal — portrait front + back stacked.
 // Shows when `open` is true. Props mirror previous usage in MemberDetail.jsx.
@@ -19,7 +20,7 @@ export default function QrCodeModal({ open, onClose, memberId = "", nickname = "
 
   if (!open) return null;
 
-  const label = nickname || firstName || lastName || "Member";
+  const label = normalizeNickname(nickname) || nickname || firstName || lastName || "Member";
   const value = String(memberId || label || "");
 
   // Custom overlay: full-viewport fixed overlay with centered content. The

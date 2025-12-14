@@ -4,6 +4,7 @@ const { fetchMemberBundle, fetchPricing, gymQuickAppend, gymClockOut, upsertGymE
 import events from '../lib/events';
 import { computeStatusForMember } from '../lib/membership';
 import ModalWrapper from './ModalWrapper';
+import { normalizeNickname } from '../lib/nickname.js';
 // small helpers
 const MANILA_TZ = 'Asia/Manila';
 const fmtDate = (d) => {
@@ -254,7 +255,7 @@ export default function CheckInConfirmModal({ open, onClose, memberId, initialEn
                 {m.PhotoURL || m.Photo ? (<img src={driveThumb(driveImg(m.PhotoURL||m.Photo))} alt="Member" style={{ width:'100%', height:'100%', objectFit:'cover' }} />) : (<div style={{ display:'flex', width:'100%', height:'100%', alignItems:'center', justifyContent:'center', color:'#999' }}>No Photo</div>)}
               </div>
               <div>
-                <div style={{ fontWeight:900, fontSize:28, lineHeight:1.1 }}>{m.NickName || m.Nickname || '-'}</div>
+                <div style={{ fontWeight:900, fontSize:28, lineHeight:1.1 }}>{normalizeNickname(m.NickName || m.Nickname || '') || '-'}</div>
                 <div style={{ fontWeight:700, fontSize:18, color:'#444', marginTop:4 }}>{[m.FirstName,m.LastName].filter(Boolean).join(' ') || '-'}</div>
                 <div style={{ fontStyle:'italic', color:'#666', marginTop:8 }}>Member Since</div>
                 <div style={{ fontWeight:800, fontSize:16 }}>{fmtDate(m.MemberSince || m['Member Since'] || m.Joined || m['Join Date'])}</div>

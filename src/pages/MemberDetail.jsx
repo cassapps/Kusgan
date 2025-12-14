@@ -18,6 +18,7 @@ import VisitViewModal from "../components/VisitViewModal";
 import CheckInConfirmModal from "../components/CheckInConfirmModal";
 import events from "../lib/events";
 import { computeStatusForMember } from '../lib/membership';
+import { normalizeNickname } from '../lib/nickname.js';
 import displayName from '../lib/displayName';
 import { getMemberPills } from '../lib/discount.js';
 
@@ -167,7 +168,7 @@ export default function MemberDetail() {
   const gender = firstOf(member, ["gender"]);
   const bdayRaw = firstOf(member, ["birthday","birth_date","dob"]);
   const bday = asDate(bdayRaw);
-  const nick = firstOf(member, ["nick_name","nickname"]);
+  const nick = normalizeNickname(firstOf(member, ["nick_name","nickname","nickname","nick_name","NickName","nickName"])) || '';
   const street = firstOf(member, ["street"]);
   const brgy = firstOf(member, ["brgy","barangay"]);
   const muni = firstOf(member, ["municipality","city"]);
