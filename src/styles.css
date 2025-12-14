@@ -687,7 +687,7 @@ table.aligned{ table-layout:fixed; margin-bottom:40px; }
   white-space: nowrap; /* keep text on one line */
 }
 /* Responsive fallbacks for smaller screens */
-@media (max-width: 900px){
+@media (max-width: 1100px){
   .member-actions{ grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 560px){

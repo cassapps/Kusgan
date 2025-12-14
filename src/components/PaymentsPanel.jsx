@@ -61,6 +61,12 @@ const fmtManilaTime = (value) => {
   }).format(d);
 };
 
+const fmtPesoWhole = (value) => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "0";
+  return new Intl.NumberFormat("en-PH", { maximumFractionDigits: 0 }).format(Math.round(n));
+};
+
 // Inclusive end-date: end = start + (days - 1)
 const endDateFrom = (startYMD, validityDays) => {
   if (!startYMD || !validityDays) return "";
@@ -429,7 +435,7 @@ export default function PaymentsPanel() {
                   <td>{r.StartDate ? fmtManilaDate(r.StartDate) : "—"}</td>
                   <td>{r.EndDate ? fmtManilaDate(r.EndDate) : "—"}</td>
                   <td>{r.Mode}</td>
-                  <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>₱{Number(r.Cost || 0).toFixed(2)}</td>
+                  <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>₱{fmtPesoWhole(r.Cost || 0)}</td>
                 </tr>
               ))
             )}
