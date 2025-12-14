@@ -899,6 +899,86 @@ export async function insertRow(sheetName, row) {
 
 export async function fetchPayments() { return { rows: await fb.getCollection(COLS.payments) }; }
 
+// Fetch the latest payment row for a given member.
+// Used by Members table to display Gym/Coach Valid Until from the latest payment document
+// even when we only loaded active payments.
+export async function fetchLatestPaymentForMember(memberId) {
+  const mid = String(memberId || '').trim();
+  if (!mid) return { row: null };
+
+  const tryQuery = async (field) => {
+    try {
+      // Prefer timestamp ordering.
+      const rows = await fb.queryCollection(COLS.payments, {
+        wheres: [{ field, op: '==', value: mid }],
+        orderBy: { field: 'timestamp', dir: 'desc' },
+        limit: 1,
+      });
+      if (rows && rows.length) return rows[0];
+    } catch (e) {
+      // Likely missing composite index or field type mismatch; fall back below.
+    }
+
+    try {
+      const rows = await fb.queryCollection(COLS.payments, {
+        wheres: [{ field, op: '==', value: mid }],
+        orderBy: { field: 'Date', dir: 'desc' },
+        limit: 10,
+      });
+      if (rows && rows.length) {
+        // If multiple payments share the same Date, pick the one with the latest Time.
+        const score = (r) => {
+          const d = String(r?.Date || r?.date || '').trim();
+          const t = String(r?.Time || r?.time || '').trim();
+          return `${d} ${t}`.trim();
+        };
+        return [...rows].sort((a, b) => score(b).localeCompare(score(a)))[0];
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    // Last resort: no orderBy.
+    try {
+      const rows = await fb.queryCollection(COLS.payments, {
+        wheres: [{ field, op: '==', value: mid }],
+        limit: 50,
+      });
+      if (rows && rows.length) {
+        const parseTs = (v) => {
+          try {
+            if (!v && v !== 0) return 0;
+            if (typeof v === 'number') return v;
+            if (v && typeof v.toMillis === 'function') return v.toMillis();
+            if (v && typeof v.toDate === 'function') return v.toDate().getTime();
+            if (v && typeof v.seconds === 'number') return v.seconds * 1000;
+            const parsed = Date.parse(String(v));
+            return isNaN(parsed) ? 0 : parsed;
+          } catch {
+            return 0;
+          }
+        };
+        const score = (r) => {
+          // Prefer timestamp-like fields; fall back to Date+Time string.
+          const ts = parseTs(r?.timestamp || r?.created || r?.createdAt || r?.paid_on || r?.date);
+          if (ts) return ts;
+          const d = String(r?.Date || r?.date || '').trim();
+          const t = String(r?.Time || r?.time || '').trim();
+          return Date.parse(`${d}T${t || '00:00'}`) || 0;
+        };
+        return [...rows].sort((a, b) => (score(b) || 0) - (score(a) || 0))[0];
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    return null;
+  };
+
+  const row = (await tryQuery('MemberID')) || (await tryQuery('memberId')) || (await tryQuery('member_id'));
+  return { row };
+}
+
 export async function updatePayment(paymentId, patch) {
   const id = String(paymentId || '').trim();
   if (!id) throw new Error('paymentId required');
@@ -1700,7 +1780,7 @@ const api = {
   fetchAttendance, fetchAttendanceSince, clockIn, clockOut,
   fetchGymEntries, fetchGymEntriesFresh, addGymEntry, gymQuickAppend,
   fetchProgressTracker, addProgressRow,
-  fetchPricing, fetchPayments, addPayment, updatePayment, deletePayment, fetchDashboard,
+  fetchPricing, fetchPayments, fetchLatestPaymentForMember, addPayment, updatePayment, deletePayment, fetchDashboard,
   // new helpers
   fetchMembersRecent, searchMembersByName,
   fetchGymEntriesSince, fetchGymEntriesForDate,

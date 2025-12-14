@@ -211,6 +211,7 @@ export default function Members() {
   const [membersLimit] = useState(Number.POSITIVE_INFINITY);
   const [rows, setRows] = useState([]);
   const [payIdx, setPayIdx] = useState(new Map());
+  const [latestPayIdx, setLatestPayIdx] = useState(new Map()); // MemberID -> latest payment row
   const [visitIdx, setVisitIdx] = useState(new Map());
   const [pricingRows, setPricingRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -385,8 +386,31 @@ export default function Members() {
       const visitTs = lastVisit ? lastVisit.getTime() : -1;
 
       const pay = memberId ? payIdx.get(memberId) : undefined;
-      const gymUntil = pay?.membershipEnd || null;
-      const coachUntil = pay?.coachEnd || null;
+      const latest = memberId ? latestPayIdx.get(memberId) : null;
+      const memberGymUntil = firstOf(r, [
+        'membershipend',
+        'membership_end',
+        'gymvaliduntil',
+        'gym_valid_until',
+        'gym_until',
+        'enddate',
+        'end_date',
+      ]);
+      const memberCoachUntil = firstOf(r, [
+        'coachend',
+        'coach_end',
+        'coachvaliduntil',
+        'coach_valid_until',
+        'coach_until',
+      ]);
+      const latestGymUntil = latest
+        ? firstOf(latest, ['GymValidUntil', 'gym_valid_until', 'gymvaliduntil', 'membershipEnd', 'membership_end', 'EndDate', 'enddate', 'end_date'])
+        : null;
+      const latestCoachUntil = latest
+        ? firstOf(latest, ['CoachValidUntil', 'coach_valid_until', 'coachvaliduntil', 'coachEnd', 'coach_end'])
+        : null;
+      const gymUntil = pay?.membershipEnd || memberGymUntil || latestGymUntil || null;
+      const coachUntil = pay?.coachEnd || memberCoachUntil || latestCoachUntil || null;
       const gymActive = pay?.membershipState === 'active';
       const coachActive = !!pay?.coachActive;
       const isActive = gymActive || coachActive;
@@ -423,13 +447,50 @@ export default function Members() {
 
     searched.sort((a, b) => (b.joinTs - a.joinTs) || (b.visitTs - a.visitTs));
     return searched;
-  }, [rows, debouncedQ, visitIdx, payIdx]);
+  }, [rows, debouncedQ, visitIdx, payIdx, latestPayIdx]);
 
   const membersPager = useLoadMore(filteredSorted, {
     initial: 20,
     step: 20,
     resetDeps: [debouncedQ],
   });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const visible = membersPager.visible || [];
+    const ids = visible.map((x) => String(x?.memberId || '').trim()).filter(Boolean);
+    const missing = ids.filter((id) => !latestPayIdx.has(id));
+    if (missing.length === 0) return;
+
+    (async () => {
+      try {
+        const batch = missing.slice(0, 40);
+        const results = await Promise.all(
+          batch.map(async (id) => {
+            try {
+              const r = await api.fetchLatestPaymentForMember(id);
+              return { id, row: r?.row || null };
+            } catch {
+              return { id, row: null };
+            }
+          })
+        );
+        if (cancelled) return;
+        setLatestPayIdx((prev) => {
+          const next = new Map(prev);
+          for (const it of results) next.set(it.id, it.row);
+          return next;
+        });
+      } catch {
+        // ignore
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [membersPager.visible, latestPayIdx]);
 
   const openDetail = useCallback((memberId, row) => {
     if (!memberId) return;
@@ -501,8 +562,14 @@ export default function Members() {
                   <tbody>
                     {membersPager.visible.map(({ r, lastVisit, isToday, memberId, gymUntil, coachUntil }, i) => {
                       const pay = memberId ? payIdx.get(memberId) : undefined;
-                      const gymActive = pay?.membershipState === 'active';
-                      const coachActive = !!pay?.coachActive;
+                      const today0 = new Date();
+                      today0.setHours(0, 0, 0, 0);
+                      const gymActive = pay
+                        ? (pay?.membershipState === 'active')
+                        : (gymUntil ? ((asDate(gymUntil)?.getTime() || 0) >= today0.getTime()) : false);
+                      const coachActive = pay
+                        ? !!pay?.coachActive
+                        : (coachUntil ? ((asDate(coachUntil)?.getTime() || 0) >= today0.getTime()) : false);
                       const first = String(firstOf(r, ["first_name","firstname","first","given_name"]) ?? "");
                       const last = String(firstOf(r, ["last_name","lastname","last","surname"]) ?? "");
                       const fullName = [first, last].filter(Boolean).map(toTitleCase).join(" ");
@@ -563,8 +630,14 @@ export default function Members() {
                 {({ index, style }) => {
                   const { r, lastVisit, isToday, memberId, gymUntil, coachUntil } = membersPager.visible[index];
                   const pay = memberId ? payIdx.get(memberId) : undefined;
-                  const gymActive = pay?.membershipState === 'active';
-                  const coachActive = !!pay?.coachActive;
+                  const today0 = new Date();
+                  today0.setHours(0, 0, 0, 0);
+                  const gymActive = pay
+                    ? (pay?.membershipState === 'active')
+                    : (gymUntil ? ((asDate(gymUntil)?.getTime() || 0) >= today0.getTime()) : false);
+                  const coachActive = pay
+                    ? !!pay?.coachActive
+                    : (coachUntil ? ((asDate(coachUntil)?.getTime() || 0) >= today0.getTime()) : false);
                   const first = String(firstOf(r, ["first_name","firstname","first","given_name"]) ?? "");
                   const last = String(firstOf(r, ["last_name","lastname","last","surname"]) ?? "");
                   const fullName = [first, last].filter(Boolean).map(toTitleCase).join(" ");
