@@ -555,10 +555,12 @@ table.aligned{ table-layout:fixed; margin-bottom:40px; }
 .pill.ok{ color:#2f9e44; border-color:#b7efc5; background:#e9f8ee; }
 .pill.bad{ color:#d64545; border-color:#f3b3b3; background:#fdecec; }
 
-/* Badges for student/senior */
+/* Discount pills */
 .pill.student { color:#1e66f5; border-color:#c7d2fe; background:#edf2ff; }
-.pill.senior  { color:#ad6800; border-color:#ffe1a8; background:#fff7e6; }
-.pill.special { color:#ad6800; border-color:#ffe1a8; background:#fff7e6; }
+/* Senior: brown */
+.pill.senior  { color:#7a4a00; border-color:#e6c9a8; background:#f7efe6; }
+/* Special: yellow */
+.pill.special { color:#8a6a00; border-color:#ffe08a; background:#fff6d6; }
 .pill.white   { color:#ffffff; border-color:rgba(255,255,255,0.6); background:rgba(255,255,255,0.18); }
 
 /* Small status badge used in tables to mark open entries */
