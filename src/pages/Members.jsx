@@ -12,6 +12,7 @@ import RefreshBadge from '../components/RefreshBadge.jsx';
 import { getMemberPills } from '../lib/discount.js';
 import { normalizeNickname } from '../lib/nickname.js';
 import useLoadMore from "../lib/useLoadMore.js";
+import events from "../lib/events";
 const AddMemberModal = React.lazy(() => import('../components/AddMemberModal.jsx'));
 
 // Simple in-memory cache for SWR-style stale-while-revalidate behavior
@@ -205,6 +206,28 @@ function buildLastVisitIndex(entriesRaw) {
   return idx;
 }
 
+// Prefer member-level last-visit fields when available to avoid scanning gym entries.
+function buildLastVisitIndexFromMembers(membersRaw) {
+  const idx = new Map();
+  for (const raw of (membersRaw || [])) {
+    try {
+      const r = normRow(raw);
+      const memberId = firstOf(r, ["memberid","member_id","id","member_id_"]);
+      if (!memberId) continue;
+      const d = asDate(firstOf(r, [
+        'lastgymvisit', 'last_gym_visit', 'lastvisit', 'last_visit', 'lastvisitdate',
+        'lastgym', 'last_gym', 'last_checkin', 'lastcheckin'
+      ]));
+      if (!d) continue;
+      const curr = idx.get(memberId);
+      if (!curr || d > curr) idx.set(memberId, d);
+    } catch (e) {
+      // ignore
+    }
+  }
+  return idx;
+}
+
 export default function Members() {
   const navigate = useNavigate();
   const useFirestore = String(import.meta.env.VITE_USE_FIRESTORE ?? 'true') === 'true';
@@ -212,7 +235,6 @@ export default function Members() {
   const [membersLimit] = useState(Number.POSITIVE_INFINITY);
   const [rows, setRows] = useState([]);
   const [payIdx, setPayIdx] = useState(new Map());
-  const [latestPayIdx, setLatestPayIdx] = useState(new Map()); // MemberID -> latest payment row
   const [visitIdx, setVisitIdx] = useState(new Map());
   const [pricingRows, setPricingRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -245,6 +267,20 @@ export default function Members() {
 
   // SWR fetcher: fetch members + active payments + gymEntries
   const membersFetcher = async () => {
+    // Firestore mode: minimize reads. We rely on member-level validity/end-date fields.
+    if (useFirestore) {
+      const [mRes, prRes] = await Promise.all([
+        api.fetchMembers(),
+        api.fetchPricing(),
+      ]);
+      return {
+        members: (mRes?.rows ?? mRes?.data ?? []).map(normRow),
+        payments: [],
+        gymEntries: [],
+        pricing: (prRes?.rows ?? prRes?.data ?? []),
+      };
+    }
+
     const paymentsPromise = (typeof api.fetchPaymentsActive === 'function')
       ? api.fetchPaymentsActive({ limit: 4000 }).catch(() => api.fetchPayments())
       : api.fetchPayments();
@@ -280,15 +316,16 @@ export default function Members() {
     try {
       setRows(data.members || []);
       setPricingRows(data.pricing || []);
-      if (useFirestore) {
-        const pays = data.payments || [];
-        paymentsRef.current = pays;
-        setPayIdx(buildStatusIndex({ membersRaw: data.members || [], paymentsRaw: pays || [], pricingRows: data.pricing || [] }));
-      } else {
-        paymentsRef.current = data.payments || [];
-        setPayIdx(buildStatusIndex({ membersRaw: data.members || [], paymentsRaw: data.payments || [], pricingRows: data.pricing || [] }));
-      }
-      setVisitIdx(buildLastVisitIndex(data.gymEntries || []));
+      paymentsRef.current = data.payments || [];
+      // In Firestore mode we intentionally do NOT bulk-load payments; status is derived from member fields.
+      setPayIdx(buildStatusIndex({ membersRaw: data.members || [], paymentsRaw: data.payments || [], pricingRows: data.pricing || [] }));
+
+      // Prefer member-level last visit for Firestore mode; legacy mode still uses gym entries.
+      if (useFirestore) setVisitIdx(buildLastVisitIndexFromMembers(data.members || []));
+      else setVisitIdx(buildLastVisitIndex(data.gymEntries || []));
+
+      // Keep local cache warm for faster next load.
+      try { localCache.setCached && localCache.setCached('members', data.members || []); } catch (_) {}
       MEMBERS_CACHE.members = data.members || [];
       MEMBERS_CACHE.payments = data.payments || [];
       MEMBERS_CACHE.gymEntries = data.gymEntries || [];
@@ -348,17 +385,9 @@ export default function Members() {
         if (cancelled) return;
         const members = (mRes?.rows ?? []).map(normRow);
         setRows(members);
-        if (useFirestore) {
-          const ids = new Set(members.map((m) => String(firstOf(m, ["memberid","member_id","id","member_id_"]) || '').trim()).filter(Boolean));
-          const basePays = paymentsRef.current || [];
-          const relevantPays = (basePays || []).filter((p) => {
-            const mid = String(p?.MemberID || p?.member_id || p?.memberId || p?.memberid || p?.id || '').trim();
-            return mid && ids.has(mid);
-          });
-          setPayIdx(buildStatusIndex({ membersRaw: members, paymentsRaw: relevantPays || [], pricingRows }));
-        } else {
-          setPayIdx(buildStatusIndex({ membersRaw: members, paymentsRaw: [], pricingRows }));
-        }
+        // Search results: recompute status from member fields (and payments if present in legacy mode).
+        setPayIdx(buildStatusIndex({ membersRaw: members, paymentsRaw: useFirestore ? [] : (paymentsRef.current || []), pricingRows }));
+        if (useFirestore) setVisitIdx(buildLastVisitIndexFromMembers(members));
       } catch (e) {
         if (!cancelled) setError(e?.message || String(e));
       } finally {
@@ -368,6 +397,85 @@ export default function Members() {
     doSearch();
     return () => { cancelled = true; };
   }, [debouncedQ, data, useFirestore, pricingRows]);
+
+  // Firestore mode: when a new payment is recorded, refresh only the affected member row.
+  // This keeps reads minimal while ensuring membership end-dates update quickly.
+  useEffect(() => {
+    if (!useFirestore) return;
+    if (typeof api.listenLatestPayment !== 'function') return;
+    if (typeof api.fetchMemberByIdFresh !== 'function') return;
+
+    let alive = true;
+    let unsub = null;
+
+    const patchMemberRow = (freshRow) => {
+      const mid = String(firstOf(freshRow || {}, ["memberid","member_id","MemberID","id"]) || '').trim();
+      if (!mid) return;
+      const freshNorm = normRow(freshRow);
+      setRows((prev) => {
+        const arr = Array.isArray(prev) ? prev : [];
+        const i = arr.findIndex((m) => String(firstOf(m || {}, ["memberid","member_id","id","member_id_"]) || '').trim() === mid);
+        if (i < 0) return arr;
+        const next = arr.slice();
+        next[i] = { ...(next[i] || {}), ...(freshNorm || {}) };
+        try { MEMBERS_CACHE.members = next; MEMBERS_CACHE.ts.members = Date.now(); saveCacheToLocalStorage(); } catch (_) {}
+        try { localCache.setCached && localCache.setCached('members', next); } catch (_) {}
+        return next;
+      });
+
+      setPayIdx((prev) => {
+        const next = new Map(prev);
+        try {
+          next.set(mid, computeStatusForMember([], freshNorm, pricingRows || []));
+        } catch (_) {}
+        return next;
+      });
+    };
+
+    try {
+      unsub = api.listenLatestPayment(async (row) => {
+        if (!alive) return;
+        const mid = String(row?.MemberID || row?.member_id || row?.memberid || row?.memberId || row?.member || row?.id || '').trim();
+        if (!mid) return;
+        try {
+          const fresh = await api.fetchMemberByIdFresh(mid);
+          if (!alive) return;
+          if (fresh) patchMemberRow(fresh);
+        } catch (_) {
+          // ignore
+        }
+      }, () => {});
+    } catch (e) {
+      unsub = null;
+    }
+
+    return () => {
+      alive = false;
+      try { unsub && unsub(); } catch (e) {}
+    };
+  }, [useFirestore, pricingRows]);
+
+  // Local UX improvement (no Firestore reads): reflect same-device check-ins immediately in Last Gym Visit.
+  useEffect(() => {
+    let unsub = null;
+    try {
+      unsub = events.on('gymEntry:added', (entry) => {
+        const mid = String(entry?.MemberID || entry?.member_id || entry?.memberid || entry?.id || entry?.member || '').trim();
+        if (!mid) return;
+        const d = asDate(entry?.Date || entry?.date || entry?.Timestamp || entry?.timestamp || entry?.TimeIn || entry?.time_in || null);
+        if (!d) return;
+        setVisitIdx((prev) => {
+          const next = new Map(prev);
+          const curr = next.get(mid);
+          if (!curr || d > curr) next.set(mid, d);
+          return next;
+        });
+      });
+    } catch (e) {
+      unsub = null;
+    }
+    return () => { try { unsub && unsub(); } catch (e) {} };
+  }, []);
 
   // mirror SWR loading/error into local state for existing UI
   useEffect(() => {
@@ -415,7 +523,6 @@ export default function Members() {
       const visitTs = lastVisit ? lastVisit.getTime() : -1;
 
       const pay = memberId ? payIdx.get(memberId) : undefined;
-      const latest = memberId ? latestPayIdx.get(memberId) : null;
       const memberGymUntil = firstOf(r, [
         'membershipend',
         'membership_end',
@@ -432,14 +539,8 @@ export default function Members() {
         'coach_valid_until',
         'coach_until',
       ]);
-      const latestGymUntil = latest
-        ? firstOf(latest, ['GymValidUntil', 'gym_valid_until', 'gymvaliduntil', 'membershipEnd', 'membership_end', 'EndDate', 'enddate', 'end_date'])
-        : null;
-      const latestCoachUntil = latest
-        ? firstOf(latest, ['CoachValidUntil', 'coach_valid_until', 'coachvaliduntil', 'coachEnd', 'coach_end'])
-        : null;
-      const gymUntil = pay?.membershipEnd || memberGymUntil || latestGymUntil || null;
-      const coachUntil = pay?.coachEnd || memberCoachUntil || latestCoachUntil || null;
+      const gymUntil = pay?.membershipEnd || memberGymUntil || null;
+      const coachUntil = pay?.coachEnd || memberCoachUntil || null;
       const gymY = manilaYMD(gymUntil);
       const coachY = manilaYMD(coachUntil);
       const gymActive = gymY ? (todayYMD ? gymY >= todayYMD : false) : (pay?.membershipState === 'active');
@@ -478,7 +579,7 @@ export default function Members() {
 
     searched.sort((a, b) => (b.joinTs - a.joinTs) || (b.visitTs - a.visitTs));
     return searched;
-  }, [rows, debouncedQ, visitIdx, payIdx, latestPayIdx]);
+  }, [rows, debouncedQ, visitIdx, payIdx]);
 
   const membersPager = useLoadMore(filteredSorted, {
     initial: 20,
@@ -486,42 +587,7 @@ export default function Members() {
     resetDeps: [debouncedQ],
   });
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const visible = membersPager.visible || [];
-    const ids = visible.map((x) => String(x?.memberId || '').trim()).filter(Boolean);
-    const missing = ids.filter((id) => !latestPayIdx.has(id));
-    if (missing.length === 0) return;
-
-    (async () => {
-      try {
-        const batch = missing.slice(0, 40);
-        const results = await Promise.all(
-          batch.map(async (id) => {
-            try {
-              const r = await api.fetchLatestPaymentForMember(id);
-              return { id, row: r?.row || null };
-            } catch {
-              return { id, row: null };
-            }
-          })
-        );
-        if (cancelled) return;
-        setLatestPayIdx((prev) => {
-          const next = new Map(prev);
-          for (const it of results) next.set(it.id, it.row);
-          return next;
-        });
-      } catch {
-        // ignore
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [membersPager.visible, latestPayIdx]);
+  // Removed per-row latest-payment fetch in Firestore mode to minimize reads.
 
   const openDetail = useCallback((memberId, row) => {
     if (!memberId) return;

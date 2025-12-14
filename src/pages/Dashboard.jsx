@@ -3,6 +3,7 @@ import { useEffect, useState, useMemo, useRef } from "react";
 import api from "../api";
 const {
   fetchMembers,
+  fetchMemberByIdFresh,
   fetchPayments,
   fetchGymEntries,
   fetchGymEntriesFresh,
@@ -10,10 +11,8 @@ const {
   fetchPricing,
   fetchDashboard,
   gymQuickAppend,
-  listenMembers,
   listenGymEntriesForDate,
   listenPaymentsForDate,
-  listenPaymentsActive,
   listenLatestPayment,
 } = api;
 import { useNavigate } from "react-router-dom";
@@ -103,7 +102,6 @@ export default function Dashboard() {
   const [paymentsToday, setPaymentsToday] = useState([]);
   const [paymentsActive, setPaymentsActive] = useState([]);
   const [gymEntries, setGymEntries] = useState([]);
-  const [gymEntriesForLastVisit, setGymEntriesForLastVisit] = useState([]);
   const [pricing, setPricing] = useState([]);
   const [showAllGym, setShowAllGym] = useState(false);
   const [showAllPayments, setShowAllPayments] = useState(false);
@@ -261,7 +259,7 @@ export default function Dashboard() {
 
   const lastVisitByMember = useMemo(() => {
     const map = new Map();
-    const source = useFirestore ? (gymEntriesForLastVisit || []) : (gymEntries || []);
+    const source = (gymEntries || []);
     for (const e of source) {
       const id = String(e?.MemberID || e?.member_id || e?.id || e?.member || '').trim();
       if (!id) continue;
@@ -271,23 +269,7 @@ export default function Dashboard() {
       if (!prev || d > prev) map.set(id, d);
     }
     return map;
-  }, [useFirestore, gymEntries, gymEntriesForLastVisit]);
-
-  useEffect(() => {
-    if (!useFirestore) return;
-    let alive = true;
-    (async () => {
-      try {
-        const res = await fetchGymEntriesSince({ days: 365, limit: 5000 });
-        if (!alive) return;
-        setGymEntriesForLastVisit(res?.rows || res?.data || []);
-      } catch (e) {
-        if (!alive) return;
-        setGymEntriesForLastVisit([]);
-      }
-    })();
-    return () => { alive = false; };
-  }, [useFirestore]);
+  }, [gymEntries]);
 
   const activeMembers = useMemo(() => {
     try {
@@ -589,67 +571,142 @@ export default function Dashboard() {
   const activePager = useLoadMore(activeList, { initial: 20, step: 20, resetDeps: [openActiveModal, activeModalKind] });
 
 
+  // Firestore mode: keep long-lived listeners as small as possible.
+  // Fetch pricing + members once, and use date-scoped listeners for today's operational data.
   useEffect(() => {
     if (!useFirestore) return;
     let alive = true;
-    let unsubMembers = null;
-    let unsubGym = null;
-    let unsubPayToday = null;
-    let unsubPayActive = null;
 
     setLoading(true);
     setIsRefreshing(true);
 
-    // Pricing is small; just fetch once.
     (async () => {
       try {
-        const pr = await fetchPricing();
+        const [pr, mres] = await Promise.all([
+          fetchPricing(),
+          fetchMembers(),
+        ]);
         if (!alive) return;
         setPricing(pr?.rows || pr?.data || []);
-      } catch (e) { /* ignore */ }
+        setMembers(mres?.rows || mres?.data || []);
+        // We intentionally avoid a broad paymentsActive listener in Firestore mode.
+        // Active status is derived primarily from member-level end-date fields.
+        setPaymentsActive([]);
+      } catch (e) {
+        // ignore
+      } finally {
+        if (!alive) return;
+        setLoading(false);
+        setIsRefreshing(false);
+      }
     })();
 
-    const asOf = (typeof selectedYmd === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(selectedYmd)) ? selectedYmd : todayYMD();
+    return () => {
+      alive = false;
+    };
+  }, [useFirestore]);
 
-    try {
-      unsubMembers = listenMembers((rows) => {
-        if (!alive) return;
-        setMembers(rows || []);
-      }, () => {});
-    } catch (e) { /* ignore */ }
+  // Date-scoped realtime listeners (small queries): gym entries + payments for the selected day.
+  useEffect(() => {
+    if (!useFirestore) return;
+    let alive = true;
+    let unsubGym = null;
+    let unsubPayToday = null;
+    let gotGym = false;
+    let gotPay = false;
+    const done = () => {
+      if (!alive) return;
+      if (gotGym && gotPay) setIsRefreshing(false);
+    };
+
+    setIsRefreshing(true);
+    const asOf = (typeof selectedYmd === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(selectedYmd)) ? selectedYmd : todayYMD();
 
     try {
       unsubGym = listenGymEntriesForDate(asOf, (rows) => {
         if (!alive) return;
         setGymEntries(rows || []);
-      }, () => {});
-    } catch (e) { /* ignore */ }
+        gotGym = true;
+        done();
+      }, () => {
+        gotGym = true;
+        done();
+      });
+    } catch (e) {
+      gotGym = true;
+      done();
+    }
 
     try {
       unsubPayToday = listenPaymentsForDate(asOf, (rows) => {
         if (!alive) return;
         setPaymentsToday(rows || []);
-      }, () => {});
-    } catch (e) { /* ignore */ }
-
-    try {
-      unsubPayActive = listenPaymentsActive((rows) => {
-        if (!alive) return;
-        setPaymentsActive(rows || []);
-      }, () => {});
-    } catch (e) { /* ignore */ }
-
-    setLoading(false);
-    setIsRefreshing(false);
+        gotPay = true;
+        done();
+      }, () => {
+        gotPay = true;
+        done();
+      });
+    } catch (e) {
+      gotPay = true;
+      done();
+    }
 
     return () => {
       alive = false;
-      try { unsubMembers && unsubMembers(); } catch (e) {}
       try { unsubGym && unsubGym(); } catch (e) {}
       try { unsubPayToday && unsubPayToday(); } catch (e) {}
-      try { unsubPayActive && unsubPayActive(); } catch (e) {}
     };
   }, [useFirestore, selectedYmd]);
+
+  // When a payment is added (latest-payment listener), refresh only the affected member row.
+  useEffect(() => {
+    if (!useFirestore) return;
+    if (typeof listenLatestPayment !== 'function') return;
+    let alive = true;
+    let unsub = null;
+
+    const patchMember = (freshRow) => {
+      try {
+        if (!freshRow) return;
+        const freshId = String(freshRow?.MemberID || freshRow?.member_id || freshRow?.memberid || freshRow?.memberId || freshRow?.id || '').trim();
+        if (!freshId) return;
+        setMembers((prev) => {
+          const arr = Array.isArray(prev) ? prev : [];
+          const idx = arr.findIndex((m) => String(m?.MemberID || m?.member_id || m?.memberid || m?.memberId || m?.id || '').trim() === freshId);
+          if (idx < 0) return arr;
+          const next = arr.slice();
+          next[idx] = { ...(next[idx] || {}), ...(freshRow || {}) };
+          return next;
+        });
+      } catch (e) {
+        // ignore
+      }
+    };
+
+    try {
+      unsub = listenLatestPayment(async (row) => {
+        if (!alive) return;
+        const mid = String(row?.MemberID || row?.member_id || row?.memberid || row?.memberId || row?.member || row?.id || '').trim();
+        if (!mid) return;
+        if (typeof fetchMemberByIdFresh !== 'function') return;
+        try {
+          const fresh = await fetchMemberByIdFresh(mid);
+          if (!alive) return;
+          patchMember(fresh);
+        } catch (e) {
+          // ignore
+        }
+      }, () => {});
+    } catch (e) {
+      unsub = null;
+    }
+
+    return () => {
+      alive = false;
+      try { unsub && unsub(); } catch (e) {}
+    };
+  }, [useFirestore, listenLatestPayment, fetchMemberByIdFresh]);
 
   useEffect(() => {
     if (useFirestore) return;
