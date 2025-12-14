@@ -1,5 +1,5 @@
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import api from "../api";
 const {
   fetchMembers,
@@ -14,6 +14,7 @@ const {
   listenGymEntriesForDate,
   listenPaymentsForDate,
   listenPaymentsActive,
+  listenLatestPayment,
 } = api;
 import { useNavigate } from "react-router-dom";
 import { fmtTime, fmtDate, display } from "./MemberDetail.jsx";
@@ -27,6 +28,7 @@ import displayName from '../lib/displayName';
 import ModalWrapper from '../components/ModalWrapper.jsx';
 import { getMemberPills } from '../lib/discount.js';
 import useLoadMore from "../lib/useLoadMore.js";
+import useManilaDayKey from '../lib/useManilaDayKey.js';
 
 function todayYMD() {
   const now = new Date();
@@ -78,6 +80,8 @@ const firstOf = (o, ks) => firstOfVisit(o, ks);
 export default function Dashboard() {
   const navigate = useNavigate();
   const useFirestore = String(import.meta.env.VITE_USE_FIRESTORE ?? 'true') === 'true';
+  const manilaDayKey = useManilaDayKey();
+  const lastTodayRef = useRef(todayYMD());
   const [selectedYmd, setSelectedYmd] = useState(() => todayYMD());
   const selectedYmdLabel = useMemo(() => formatManilaYmdLong(selectedYmd), [selectedYmd]);
   // state/hooks
@@ -183,7 +187,39 @@ export default function Dashboard() {
       out.push({ ymd, label: formatManilaYmdLong(ymd) });
     }
     return out;
-  }, []);
+  }, [manilaDayKey]);
+
+  // If the user had "today" selected, keep it on the new day after Manila midnight.
+  useEffect(() => {
+    const curToday = todayYMD();
+    const prevToday = lastTodayRef.current;
+    if (prevToday && selectedYmd === prevToday && curToday !== prevToday) {
+      setSelectedYmd(curToday);
+    }
+    lastTodayRef.current = curToday;
+  }, [manilaDayKey, selectedYmd]);
+
+  // Trigger a lightweight refresh bump when any payment is added (Firestore realtime).
+  const [paymentsBump, setPaymentsBump] = useState(0);
+  useEffect(() => {
+    if (!useFirestore) return;
+    let unsub = null;
+    let lastId = null;
+    try {
+      unsub = listenLatestPayment((row) => {
+        const id = String(row?.id || row?._id || '').trim();
+        if (!id) return;
+        if (lastId && id === lastId) return;
+        lastId = id;
+        setPaymentsBump((x) => x + 1);
+      }, () => {});
+    } catch (e) {
+      unsub = null;
+    }
+    return () => {
+      try { unsub && unsub(); } catch (e) {}
+    };
+  }, [useFirestore, listenLatestPayment]);
 
   const resolveMemberId = (m) => String(m?.MemberID || m?.member_id || m?.memberid || m?.memberId || m?.id || '').trim();
   const resolveNick = (m) => String(m?.NickName || m?.nick_name || m?.nickname || m?.nickName || '').trim();
@@ -306,7 +342,7 @@ export default function Dashboard() {
     } catch (e) {
       return { gym: [], coach: [] };
     }
-  }, [useFirestore, members, paymentsByMember, activePaymentsByMember, pricing, selectedYmd]);
+  }, [useFirestore, members, paymentsByMember, activePaymentsByMember, pricing, selectedYmd, manilaDayKey, paymentsBump]);
 
   const openActiveList = (kind) => {
     setActiveModalKind(kind);
@@ -354,7 +390,6 @@ export default function Dashboard() {
                 {pills.map(p => <span key={p.key} className={`pill ${p.className}`}>{p.label}</span>)}
               </span>
             )}
-            {isOpen && <span className="status-badge on">On</span>}
           </span>
         </td>
         <td>{fmtTime(timeIn)}</td>
@@ -504,6 +539,7 @@ export default function Dashboard() {
         if (!pid) return false;
         return String(m.MemberID || m.member_id || m.id || '').trim() === pid;
       });
+      const pills = member ? getMemberPills(member) : [];
       const gymValidRaw = p.gymvaliduntil || p.GymValidUntil || p.gym_valid_until || p.gym_until || p.EndDate || p.Enddate || p.enddate || p.end_date || p.end || p.valid_until || p.expiry || p.expires || p.until || '';
       const coachValidRaw = p.coachvaliduntil || p.CoachValidUntil || p.coach_valid_until || p.coach_until || '';
       const gymValid = fmtDate(gymValidRaw);
@@ -511,7 +547,16 @@ export default function Dashboard() {
 
       return (
         <tr key={idx}>
-          <td>{displayName(member)}</td>
+          <td>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <span>{displayName(member)}</span>
+              {pills.length > 0 && (
+                <span style={{ display: 'inline-flex', gap: 6 }}>
+                  {pills.map(p => <span key={p.key} className={`pill ${p.className}`}>{p.label}</span>)}
+                </span>
+              )}
+            </span>
+          </td>
           <td>{display(p.Particulars || p.particulars || p.type || p.item || p.category || p.product || p.paymentfor || p.plan || p.description)}</td>
           <td>{display(gymValid)}</td>
           <td>{display(coachValid)}</td>
@@ -697,6 +742,18 @@ export default function Dashboard() {
     const unsub2 = events.on('member:updated', async () => {
       try { const membersRes = await fetchMembers(); setMembers(membersRes?.rows || membersRes?.data || []); } catch (e) {}
     });
+    const unsub3 = events.on('payment:added', async () => {
+      try {
+        const [paymentsRes, pricingRes] = await Promise.all([
+          fetchPayments(),
+          fetchPricing(),
+        ]);
+        setPayments(paymentsRes?.rows || paymentsRes?.data || []);
+        setPricing(pricingRes?.rows || pricingRes?.data || []);
+      } catch (e) {
+        // ignore
+      }
+    });
     // Periodic refresh: poll gym entries every 15s so dashboard reflects recent checkins/outs
     const pollInterval = setInterval(async () => {
       try {
@@ -705,7 +762,7 @@ export default function Dashboard() {
         setGymEntries(gymRes?.rows || gymRes?.data || []);
       } catch (e) { /* ignore */ }
     }, 15000);
-    return () => { unsub(); unsub2(); clearInterval(pollInterval); };
+    return () => { unsub(); unsub2(); unsub3(); clearInterval(pollInterval); };
   }, [useFirestore]);
 
   // Recompute stats whenever key data changes so UI (checked-in count etc.) updates immediately
@@ -804,7 +861,7 @@ export default function Dashboard() {
     } catch (e) {
       console.warn('Failed to recompute stats on data change', e);
     }
-  }, [useFirestore, members, payments, paymentsToday, paymentsActive, gymEntries, pricing, activePaymentsByMember, selectedYmd]);
+  }, [useFirestore, members, payments, paymentsToday, paymentsActive, gymEntries, pricing, activePaymentsByMember, selectedYmd, manilaDayKey, paymentsBump]);
 
   // Checkout handler: attempt to close an open gym entry for the given member id.
   const handleCheckout = async (entry, payload = {}) => {

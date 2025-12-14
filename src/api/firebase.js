@@ -1164,6 +1164,28 @@ export async function addPayment(payload) {
   return { ok: true, id: r.id };
 }
 
+// Realtime helper: listen to the latest payment doc (by timestamp).
+// Useful for triggering lightweight refreshes (e.g., recomputing tiles) when any payment is added.
+export function listenLatestPayment(callback, onError) {
+  try {
+    return fb.listenQueryCollection(
+      COLS.payments,
+      { orderBy: { field: 'timestamp', dir: 'desc' }, limit: 1 },
+      (rows) => {
+        try {
+          callback && callback((rows && rows[0]) ? rows[0] : null);
+        } catch (e) {
+          onError && onError(e);
+        }
+      },
+      onError
+    );
+  } catch (e) {
+    onError && onError(e);
+    return () => {};
+  }
+}
+
 export async function addExpense(payload) {
   const safe = { ...(payload || {}) };
   if (!safe.Date) safe.Date = manilaYMD(new Date());

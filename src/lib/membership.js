@@ -69,7 +69,9 @@ export function computeStatusForMember(paymentsArray, memberOrId, pricingRows = 
       if (!pid || pid !== memberId) continue;
     }
     const tag = String(firstOf(p, ['particulars','type','item','category','product','paymentfor','plan','description']) || '').trim();
-    const gymUntilRaw = firstOf(p, ['gymvaliduntil','gym_valid_until','gym_until','enddate','end_date','valid_until','expiry','expires','until','end']);
+    // Only treat explicit gym-specific fields as gym-until. Do NOT treat generic enddate
+    // as a gym-until (that can come from coach payments and would incorrectly activate gym).
+    const gymUntilRaw = firstOf(p, ['gymvaliduntil','gym_valid_until','gym_until','membershipend','membership_end','membershipEnd']);
     // Only treat explicit coach-specific fields as coach-until. Do NOT treat generic enddate
     // as a coach-until (that made coach end mirror gym end incorrectly).
     const coachUntilRaw = firstOf(p, ['coachvaliduntil','coach_valid_until','coach_until','coach_end','coachend']);

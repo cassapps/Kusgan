@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api";
 import displayName from "../lib/displayName";
@@ -6,6 +6,7 @@ import { fmtDate, fmtDateTime, fmtTime, display } from "./MemberDetail.jsx";
 import ModalWrapper from "../components/ModalWrapper.jsx";
 import { getMemberPills } from "../lib/discount.js";
 import useLoadMore from "../lib/useLoadMore.js";
+import useManilaDayKey from "../lib/useManilaDayKey.js";
 
 const {
   fetchMembers,
@@ -18,6 +19,7 @@ const {
   listenRevenuesForMonth,
   addExpense,
   addRevenue,
+  listenLatestPayment,
 } = api;
 
 const MANILA_TZ = "Asia/Manila";
@@ -83,7 +85,10 @@ function monthKeysBetween(startKey, endKey) {
 
 export default function Reports() {
   const useFirestore = String(import.meta.env.VITE_USE_FIRESTORE ?? "true") === "true";
+  const manilaDayKey = useManilaDayKey();
   const navigate = useNavigate();
+
+  const lastTodayRef = useRef(manilaTodayYMD());
 
   const START_MONTH = "2025-11";
 
@@ -98,14 +103,23 @@ export default function Reports() {
       cur.setMonth(cur.getMonth() + 1);
     }
     return out;
-  }, []);
+  }, [manilaDayKey]);
 
   const defaultMonthKey = useMemo(() => {
     const cur = monthKeyForDate(new Date());
     return cur && cur >= START_MONTH ? cur : START_MONTH;
-  }, []);
+  }, [manilaDayKey]);
 
   const [selectedMonthKey, setSelectedMonthKey] = useState(defaultMonthKey);
+  const lastDefaultMonthRef = useRef(defaultMonthKey);
+
+  useEffect(() => {
+    const prev = lastDefaultMonthRef.current;
+    if (prev && selectedMonthKey === prev && defaultMonthKey && defaultMonthKey !== prev) {
+      setSelectedMonthKey(defaultMonthKey);
+    }
+    lastDefaultMonthRef.current = defaultMonthKey;
+  }, [defaultMonthKey, selectedMonthKey]);
   const [members, setMembers] = useState([]);
   const [paymentsMonth, setPaymentsMonth] = useState([]);
   const [revenuesMonth, setRevenuesMonth] = useState([]);
@@ -118,6 +132,66 @@ export default function Reports() {
   const [openAddExpense, setOpenAddExpense] = useState(false);
   const [revenueForm, setRevenueForm] = useState({ Date: manilaTodayYMD(), Category: "Grocery", Particulars: "", Mode: "Cash", Cost: "" });
   const [expenseForm, setExpenseForm] = useState({ Date: manilaTodayYMD(), Category: "Equipment", Item: "", Cost: "" });
+    // Keep default date fields in sync when the Manila day changes (only if still on the previous default).
+    useEffect(() => {
+      const today = manilaTodayYMD();
+      const prevToday = lastTodayRef.current;
+      setRevenueForm((prev) => {
+        const prevDate = String(prev?.Date || '').trim();
+        if (!prevDate || prevDate === prevToday) return { ...(prev || {}), Date: today };
+        return prev;
+      });
+      setExpenseForm((prev) => {
+        const prevDate = String(prev?.Date || '').trim();
+        if (!prevDate || prevDate === prevToday) return { ...(prev || {}), Date: today };
+        return prev;
+      });
+      lastTodayRef.current = today;
+    }, [manilaDayKey]);
+
+    // Bump totals cache when any payment is added (covers backdated payments that affect balances).
+    const [paymentsBump, setPaymentsBump] = useState(0);
+    useEffect(() => {
+      if (!useFirestore) return;
+      if (typeof listenLatestPayment !== 'function') return;
+      let unsub = null;
+      let lastId = null;
+      const toMonthKey = (row) => {
+        try {
+          const raw = row?.Date || row?.date || row?.pay_date || null;
+          let ymd = '';
+          if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}/.test(raw.trim())) ymd = raw.trim().slice(0, 10);
+          if (!ymd && row?.timestamp && typeof row.timestamp.toDate === 'function') {
+            const d = row.timestamp.toDate();
+            ymd = new Intl.DateTimeFormat('en-CA', { timeZone: MANILA_TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+          }
+          if (!ymd) return '';
+          return String(ymd).slice(0, 7);
+        } catch {
+          return '';
+        }
+      };
+      try {
+        unsub = listenLatestPayment((row) => {
+          const id = String(row?.id || row?._id || '').trim();
+          if (!id) return;
+          if (lastId && id === lastId) return;
+          lastId = id;
+          const mk = toMonthKey(row);
+          if (mk) {
+            setTotalsByMonth((prev) => {
+              const next = { ...(prev || {}) };
+              if (next[mk]) next[mk] = { ...(next[mk] || {}), _loading: true };
+              return next;
+            });
+          }
+          setPaymentsBump((x) => x + 1);
+        }, () => {});
+      } catch (e) {
+        unsub = null;
+      }
+      return () => { try { unsub && unsub(); } catch (e) {} };
+    }, [useFirestore, listenLatestPayment]);
   const [revBusy, setRevBusy] = useState(false);
   const [expBusy, setExpBusy] = useState(false);
   const [revErr, setRevErr] = useState("");
@@ -274,7 +348,7 @@ export default function Reports() {
     return () => {
       alive = false;
     };
-  }, [selectedMonthKey]);
+  }, [selectedMonthKey, paymentsBump]);
 
   // Keep selected month totals in sync with live table rows (payments + manual revenues + expenses).
   useEffect(() => {
