@@ -546,7 +546,7 @@ export default function StaffAttendance() {
     <div className="dashboard-content">
       <h2 className="dashboard-title">Staff Attendance <RefreshBadge show={loading && !busy} /></h2>
       <div className="panel">
-        <div className="panel-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <div className="panel-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
           <span>Select Staff Member</span>
           <div style={{ display: 'inline-flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <select value={selected} onChange={e => setSelected(e.target.value)} style={{ height: 44, padding: '8px 12px', border: '1px solid #e7e8ef', borderRadius: 10, fontSize: 16, minWidth: 240 }}>
@@ -557,7 +557,7 @@ export default function StaffAttendance() {
                 availableStaffForClockIn.map(s => <option key={s} value={s}>{s}</option>)
               )}
             </select>
-            <button className="primary-btn" onClick={onClockIn} disabled={!selected || busy || availableStaffForClockIn.length === 0}>
+            <button className="primary-btn" onClick={onClockIn} disabled={!selected || busy || availableStaffForClockIn.length === 0} style={{ minWidth: 140, height: 44, fontSize: 16 }}>
               {busy ? 'Processing…' : 'Clock In'}
             </button>
           </div>
@@ -593,7 +593,7 @@ export default function StaffAttendance() {
                     <td style={{ textAlign: 'center' }}>{computeHours(r)}</td>
                     <td style={{ textAlign: 'center' }}>
                       {open ? (
-                        <button className="button" type="button" disabled={busy} onClick={() => onClockOut(staffName)}>
+                        <button className="primary-btn" type="button" disabled={busy} onClick={() => onClockOut(staffName)} style={{ minWidth: 140, height: 44, fontSize: 16 }}>
                           Clock Out
                         </button>
                       ) : '—'}
