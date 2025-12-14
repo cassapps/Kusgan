@@ -376,6 +376,29 @@ h3{ margin-top:16px; }
 table{ width:100%; border-collapse:collapse; border:1px solid var(--light-border); }
 th,td{ padding:10px; border-bottom:1px solid var(--light-border); }
 td{ text-align:center; vertical-align:middle; }
+
+/* ---------- Responsive tables (iPad / small screens) ---------- */
+/* Keep column alignment by preventing cell wrapping, and allow horizontal scroll instead of squishing. */
+@media (max-width: 1024px){
+  table{
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    min-width: 720px;
+  }
+  th, td{
+    white-space: nowrap;
+    padding: 8px;
+    font-size: 13px;
+  }
+}
+
+/* Extra-tight for very small screens */
+@media (max-width: 768px){
+  table{ min-width: 680px; }
+  th, td{ padding: 7px; font-size: 12px; }
+}
 th{
   text-align:center;
   vertical-align:middle;
