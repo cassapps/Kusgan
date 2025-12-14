@@ -295,9 +295,9 @@ body{
   left: 0;
   bottom: 0;
   width: var(--sidebar-width);
-  background: var(--light-bg);
+  background: #4b5563;
   border-right: 1px solid var(--sidebar-border);
-  color: #111;
+  color: #fff;
   padding:16px 12px;
   overflow-y:auto;
   display: flex;
@@ -350,11 +350,11 @@ body{
 .nav a{
   display:flex; align-items:center; gap:10px;
   padding:10px 12px; margin:4px 0; border-radius:10px;
-  color:#111; text-decoration:none;
+  color:#fff; text-decoration:none;
   transition:background .15s ease,color .15s ease;
 }
-.nav a:hover{ background: rgba(0,0,0,0.06); }
-.nav a.active{ background:var(--kusgan-magenta-100); color:#111; font-weight:900; }
+.nav a:hover{ background: rgba(255,255,255,0.12); }
+.nav a.active{ background: rgba(255,255,255,0.18); color:#fff; font-weight:900; }
 
 /* ---------- Content wrappers ---------- */
 .content{ padding:18px; }
