@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api";
 import displayName from "../lib/displayName";
-import { fmtDate, fmtDateTime, display } from "./MemberDetail.jsx";
+import { fmtDate, fmtDateTime, fmtTime, display } from "./MemberDetail.jsx";
 import ModalWrapper from "../components/ModalWrapper.jsx";
 import { getMemberPills } from "../lib/discount.js";
 import useLoadMore from "../lib/useLoadMore.js";
@@ -374,7 +374,15 @@ export default function Reports() {
           onClick={onRowClick}
           style={isClickable ? { cursor: 'pointer' } : undefined}
         >
-          <td>{display(fmtDateTime(paidRaw))}</td>
+          <td style={{ whiteSpace: 'nowrap' }}>
+            {(() => {
+              const d = fmtDate(paidRaw);
+              if (d === '-') return '-';
+              if (isManual) return d;
+              const t = fmtTime(p.Time || p.time);
+              return t && t !== '-' ? `${d} ${t}` : d;
+            })()}
+          </td>
           <td style={{ textAlign: 'center' }}>
             {isManual ? (
               display(nickCell)

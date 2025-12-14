@@ -832,6 +832,14 @@ export default function MemberDetail() {
       <div className="panel">
         <div className="panel-header">Payments</div>
         <table className="aligned payments-table">
+        <colgroup>
+          <col style={{ width: '22%' }} />
+          <col style={{ width: '28%' }} />
+          <col style={{ width: '18%' }} />
+          <col style={{ width: '18%' }} />
+          <col style={{ width: '7%' }} />
+          <col style={{ width: '7%' }} />
+        </colgroup>
         <thead>
           <tr>
             <th>Date</th>
@@ -855,12 +863,19 @@ export default function MemberDetail() {
             <tr><td colSpan={6}>-</td></tr>
           ) : payments.slice(0, paymentsLimit).map((p, i) => {
             const paid = asDate(firstOf(p, ["date","paid_on","created","timestamp"]));
+            const time = firstOf(p, ["time","paid_time","time_paid"]);
             const particulars = firstOf(p, ["particulars","type","item","category","product","paymentfor","plan","description"]);
             const gymUntil = asDate(firstOf(p, ["gymvaliduntil","gym_valid_until","gym_until"]));
             const coachUntil = asDate(firstOf(p, ["coachvaliduntil","coach_valid_until","coach_until"]));
             const mode = firstOf(p, ["mode","payment_mode","method","via"]);
             const cost = firstOf(p, ["cost","amount","price","total","paid"]);
             const canOpen = isAdmin && !!String(p?.id || '').trim();
+            const dateText = (() => {
+              const d = fmtDate(paid);
+              if (d === '-') return '-';
+              const t = fmtTime(time);
+              return t && t !== '-' ? `${d} ${t}` : d;
+            })();
             return (
               <tr
                 key={i}
@@ -870,12 +885,12 @@ export default function MemberDetail() {
                   setSelectedPayment(p);
                 }}
               >
-                <td>{fmtDateTime(paid)}</td>
+                <td style={{ whiteSpace: 'nowrap' }}>{dateText}</td>
                 <td>{display(particulars)}</td>
                 <td>{fmtDate(gymUntil)}</td>
                 <td>{fmtDate(coachUntil)}</td>
-                <td>{display(mode)}</td>
-                <td>{display(cost)}</td>
+                <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>{display(mode)}</td>
+                <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{display(cost)}</td>
               </tr>
             );
           })}
