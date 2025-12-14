@@ -6,6 +6,7 @@ const {
   fetchPayments,
   fetchGymEntries,
   fetchGymEntriesFresh,
+  fetchGymEntriesSince,
   fetchPricing,
   fetchDashboard,
   gymQuickAppend,
@@ -48,6 +49,29 @@ function shiftManilaYMD(ymd, deltaDays) {
   }
 }
 
+function formatManilaYmdLong(ymd) {
+  try {
+    const s = String(ymd || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    const d = new Date(`${s}T00:00:00+08:00`);
+    if (!(d instanceof Date) || isNaN(d)) return s;
+    const dateParts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Manila',
+      month: 'short',
+      day: '2-digit',
+      year: 'numeric',
+    }).formatToParts(d);
+    const dow = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Manila', weekday: 'long' }).format(d);
+    const mon = dateParts.find(p => p.type === 'month')?.value || '';
+    const day = dateParts.find(p => p.type === 'day')?.value || '';
+    const year = dateParts.find(p => p.type === 'year')?.value || '';
+    if (!mon || !day || !year) return s;
+    return `${mon}-${day}, ${year} (${String(dow || '').toUpperCase()})`;
+  } catch (e) {
+    return String(ymd || '');
+  }
+}
+
 // Keep local name firstOf for earlier usage but delegate to shared visit util
 const firstOf = (o, ks) => firstOfVisit(o, ks);
 
@@ -55,6 +79,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const useFirestore = String(import.meta.env.VITE_USE_FIRESTORE ?? 'true') === 'true';
   const [selectedYmd, setSelectedYmd] = useState(() => todayYMD());
+  const selectedYmdLabel = useMemo(() => formatManilaYmdLong(selectedYmd), [selectedYmd]);
   // state/hooks
   const [stats, setStats] = useState({
     totalMembers: 0,
@@ -73,6 +98,7 @@ export default function Dashboard() {
   const [paymentsToday, setPaymentsToday] = useState([]);
   const [paymentsActive, setPaymentsActive] = useState([]);
   const [gymEntries, setGymEntries] = useState([]);
+  const [gymEntriesForLastVisit, setGymEntriesForLastVisit] = useState([]);
   const [pricing, setPricing] = useState([]);
   const [showAllGym, setShowAllGym] = useState(false);
   const [showAllPayments, setShowAllPayments] = useState(false);
@@ -154,7 +180,7 @@ export default function Dashboard() {
     const out = [];
     for (let i = 0; i < 7; i++) {
       const ymd = shiftManilaYMD(today, -i);
-      out.push({ ymd, label: i === 0 ? `${ymd} (Today)` : ymd });
+      out.push({ ymd, label: formatManilaYmdLong(ymd) });
     }
     return out;
   }, []);
@@ -198,7 +224,8 @@ export default function Dashboard() {
 
   const lastVisitByMember = useMemo(() => {
     const map = new Map();
-    for (const e of (gymEntries || [])) {
+    const source = useFirestore ? (gymEntriesForLastVisit || []) : (gymEntries || []);
+    for (const e of source) {
       const id = String(e?.MemberID || e?.member_id || e?.id || e?.member || '').trim();
       if (!id) continue;
       const d = parseMaybeDate(e?.Date || e?.date || e?.Timestamp || e?.timestamp || e?.created || e?.TimeIn || null);
@@ -207,11 +234,28 @@ export default function Dashboard() {
       if (!prev || d > prev) map.set(id, d);
     }
     return map;
-  }, [gymEntries]);
+  }, [useFirestore, gymEntries, gymEntriesForLastVisit]);
+
+  useEffect(() => {
+    if (!useFirestore) return;
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetchGymEntriesSince({ days: 365, limit: 5000 });
+        if (!alive) return;
+        setGymEntriesForLastVisit(res?.rows || res?.data || []);
+      } catch (e) {
+        if (!alive) return;
+        setGymEntriesForLastVisit([]);
+      }
+    })();
+    return () => { alive = false; };
+  }, [useFirestore]);
 
   const activeMembers = useMemo(() => {
     try {
-      const asOf = (typeof selectedYmd === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(selectedYmd)) ? selectedYmd : todayYMD();
+      // Active lists are always as-of today (not the selected historical date).
+      const asOf = todayYMD();
       const pick = (o, keys) => {
         for (const k of keys) {
           if (o && Object.prototype.hasOwnProperty.call(o, k)) return o[k];
@@ -242,8 +286,10 @@ export default function Dashboard() {
         const membershipState = String(m?.membershipState || m?.membership_state || m?.status || '').trim().toLowerCase();
         const coachState = String(m?.coachState || m?.coach_state || '').trim().toLowerCase();
 
-        const gymActive = (st0?.membershipState === 'active') || (membershipState === 'active') || isDateActive(gymUntil, asOf);
-        const coachActive = (st0?.coachActive === true) || (coachState === 'active') || isDateActive(coachUntil, asOf);
+        // Only trust member-level "active" flags when an end-date is missing.
+        // If an end-date exists, the date comparison wins.
+        const gymActive = (st0?.membershipState === 'active') || isDateActive(gymUntil, asOf) || (!gymUntil && membershipState === 'active');
+        const coachActive = (st0?.coachActive === true) || isDateActive(coachUntil, asOf) || (!coachUntil && coachState === 'active');
 
         const st = {
           ...(st0 || {}),
@@ -324,6 +370,8 @@ export default function Dashboard() {
   // Helper: compute stats from fetched arrays (returns stats object)
   const computeStatsFromData = (membersArr, paymentsArr, gymArr, pricingArr, asOfYmd) => {
     const asOf = (typeof asOfYmd === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(asOfYmd)) ? asOfYmd : todayYMD();
+    // Active membership/subscription counts are always as-of today.
+    const asOfMembership = todayYMD();
     const pricingFlags = new Map();
     const truthy = (v) => { const s = String(v ?? "").trim().toLowerCase(); return s === "yes" || s === "y" || s === "true" || s === "1"; };
     const pick = (o, keys) => { for (const k of keys) { if (o && Object.prototype.hasOwnProperty.call(o, k)) return o[k]; const alt = Object.keys(o || {}).find((kk) => kk.toLowerCase().replace(/\s+/g, "") === k.toLowerCase().replace(/\s+/g, "")); if (alt) return o[alt]; } return undefined; };
@@ -350,7 +398,7 @@ export default function Dashboard() {
     for (const m of (membersArr || [])) {
       const id = String(m.MemberID || m.member_id || m.id || "").trim();
       const pays = paymentsByMember.get(id) || [];
-      const st = computeStatusForMember(pays, m, pricingArr, asOf);
+      const st = computeStatusForMember(pays, m, pricingArr, asOfMembership);
       // Fallback: if payments don't indicate an active membership, check member-level fields
       if (st.membershipState !== 'active') {
         const memberState = (m.membershipState || m.membership_state || m.status || "").toLowerCase();
@@ -360,7 +408,7 @@ export default function Dashboard() {
           const memberGymUntil = pick(m, ["membershipEnd","membership_end","gymvaliduntil","gym_valid_until","gym_until","enddate","end_date","valid_until","expiry","expires","until","end","gym_valid","gym_validity","gymvalid"]);
           if (memberGymUntil) {
             const gy = manilaYMD(memberGymUntil);
-            if (gy && gy >= asOf) st.membershipState = 'active';
+            if (gy && gy >= asOfMembership) st.membershipState = 'active';
           }
         }
       }
@@ -669,7 +717,8 @@ export default function Dashboard() {
         return;
       }
 
-      const asOf = (typeof selectedYmd === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(selectedYmd)) ? selectedYmd : todayYMD();
+      // Active membership/subscription counts are always as-of today.
+      const asOfMembership = todayYMD();
 
       const pick = (o, keys) => {
         for (const k of keys) {
@@ -689,15 +738,15 @@ export default function Dashboard() {
 
         // Prefer payment-derived status when available
         const pays = activePaymentsByMember.get(memberId) || [];
-        const stFromPays = pays.length ? computeStatusForMember(pays, m, pricing || [], asOf) : null;
+        const stFromPays = pays.length ? computeStatusForMember(pays, m, pricing || [], asOfMembership) : null;
 
         const membershipState = String(m?.membershipState || m?.membership_state || m?.status || '').trim().toLowerCase();
         const coachState = String(m?.coachState || m?.coach_state || '').trim().toLowerCase();
         const gymUntil = pick(m, ["membershipEnd","membership_end","gymvaliduntil","gym_valid_until","gym_until","enddate","end_date","valid_until","expiry","expires","until","end","gym_valid","gym_validity","gymvalid"]);
         const coachUntil = pick(m, ["coachEnd","coach_end","coach_subscription_end","coach_subscription_end_date","coachvaliduntil","coach_valid_until","coach_until","coach_expiry","coach_expires"]);
 
-        const gymActive = (stFromPays?.membershipState === 'active') || (membershipState === 'active') || isDateActive(gymUntil, asOf);
-        const coachActive = (stFromPays?.coachActive === true) || (coachState === 'active') || isDateActive(coachUntil, asOf);
+        const gymActive = (stFromPays?.membershipState === 'active') || isDateActive(gymUntil, asOfMembership) || (!gymUntil && membershipState === 'active');
+        const coachActive = (stFromPays?.coachActive === true) || isDateActive(coachUntil, asOfMembership) || (!coachUntil && coachState === 'active');
         if (gymActive) activeGym++;
         if (coachActive) activeCoach++;
       }
@@ -909,13 +958,13 @@ export default function Dashboard() {
         <ModalWrapper
           open={openPaymentsModal}
           onClose={() => setOpenPaymentsModal(false)}
-          title={(() => {
-            const asOf = (typeof selectedYmd === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(selectedYmd)) ? selectedYmd : todayYMD();
-            const label = asOf === todayYMD() ? 'Today' : asOf;
-            if (paymentsModalKind === 'cash') return `Cash Payments (${label})`;
-            if (paymentsModalKind === 'gcash') return `GCash Payments (${label})`;
-            return `Payments (${label})`;
-          })()}
+          title={paymentsModalKind === 'cash'
+            ? `Cash Payments for ${selectedYmdLabel}`
+            : (paymentsModalKind === 'gcash'
+              ? `GCash Payments for ${selectedYmdLabel}`
+              : `Payments for ${selectedYmdLabel}`
+            )
+          }
         >
           <div style={{ overflowX: 'auto' }}>
             <table className="aligned payments-table" style={{ width: '100%' }}>
@@ -956,10 +1005,7 @@ export default function Dashboard() {
         </ModalWrapper>
         {/* Gym Entries Table */}
         <div style={{marginTop:24}} className="panel">
-          <div className="panel-header">Gym Entries {(() => {
-            const asOf = (typeof selectedYmd === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(selectedYmd)) ? selectedYmd : todayYMD();
-            return asOf === todayYMD() ? 'Today' : `(${asOf})`;
-          })()}</div>
+          <div className="panel-header">Gym Entries for {selectedYmdLabel}</div>
           <table className="aligned">
             <thead>
               <tr>
@@ -1042,7 +1088,9 @@ export default function Dashboard() {
                   return activePager.visible.map(({ member: m, memberId, st }, idx) => {
                     const nick = resolveNick(m).toUpperCase();
                     const memberSince = resolveMemberSince(m);
-                    const lastVisit = lastVisitByMember.get(memberId) || null;
+                    const lastVisit = lastVisitByMember.get(memberId) || parseMaybeDate(
+                      m?.LastGymVisit || m?.lastGymVisit || m?.last_gym_visit || m?.lastVisit || m?.last_visit || m?.LastVisit || null
+                    ) || null;
                     const gymUntil = st?.membershipEnd || null;
                     const coachUntil = st?.coachEnd || null;
                     const pills = m ? getMemberPills(m) : [];
@@ -1067,8 +1115,8 @@ export default function Dashboard() {
                         </td>
                         <td style={{ textAlign: 'center' }}>{fmtDate(memberSince)}</td>
                         <td style={{ textAlign: 'center' }}>{lastVisit ? fmtDate(lastVisit) : ''}</td>
-                        <td style={{ textAlign: 'center', color: gymUntil ? (isDateActive(gymUntil) ? 'green' : 'red') : 'inherit' }}>{gymUntil ? fmtDate(gymUntil) : ''}</td>
-                        <td style={{ textAlign: 'center', color: coachUntil ? (isDateActive(coachUntil) ? 'green' : 'red') : 'inherit' }}>{coachUntil ? fmtDate(coachUntil) : ''}</td>
+                        <td style={{ textAlign: 'center', color: gymUntil ? (isDateActive(gymUntil, todayYMD()) ? 'green' : 'red') : 'inherit' }}>{gymUntil ? fmtDate(gymUntil) : ''}</td>
+                        <td style={{ textAlign: 'center', color: coachUntil ? (isDateActive(coachUntil, todayYMD()) ? 'green' : 'red') : 'inherit' }}>{coachUntil ? fmtDate(coachUntil) : '-'}</td>
                       </tr>
                     );
                   });
