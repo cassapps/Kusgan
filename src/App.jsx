@@ -6,6 +6,7 @@ import { getAuth, onAuthStateChanged, signOut } from 'firebase/auth';
 import { ensureFirebase } from './lib/firebase';
 
 import Nav from "./components/Nav";
+import TopBar from './components/TopBar.jsx';
 import Dashboard from "./pages/Dashboard";
 import Reports from "./pages/Reports";
 import Members from "./pages/Members";
@@ -29,11 +30,33 @@ export default function App() {
   const [token, setToken] = useState("");
   const [fbUser, setFbUser] = useState(null);
   const [fbAuthReady, setFbAuthReady] = useState(!useFirestore);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     const saved = apiClient.getToken();
     if (saved) setToken(saved);
   }, []);
+
+  // Determine admin role for UI (best-effort; defaults to Front Desk).
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        // Only attempt role lookup when logged in (or a token exists).
+        const hasAnyAuth = Boolean(apiClient.getToken()) || Boolean(fbUser);
+        if (!hasAnyAuth) return setIsAdmin(false);
+        const res = await apiClient.fetchWithAuth('/auth/me');
+        if (!mounted) return;
+        if (!res?.ok) return setIsAdmin(false);
+        const json = await res.json().catch(() => ({}));
+        setIsAdmin(Boolean(json?.user?.role === 'admin'));
+      } catch {
+        setIsAdmin(false);
+      }
+    })();
+    return () => { mounted = false; };
+  }, [token, fbUser]);
 
   // In Firestore mode, require Firebase Auth (otherwise Firestore rules often return PERMISSION_DENIED).
   // This prevents stale server tokens (from /auth/login) from putting the UI into a broken state.
@@ -62,6 +85,7 @@ export default function App() {
 
   const handleLogout = () => {
     setToken("");
+    setIsAdmin(false);
     localStorage.removeItem("authToken");
     if (useFirestore) {
       try { signOut(getAuth()); } catch (e) {}
@@ -76,9 +100,15 @@ export default function App() {
   }
 
   return (
-    <div className="app">
+    <div className={`app ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
       <GlobalToasts />
-      <Nav onLogout={handleLogout} />
+      <TopBar
+        collapsed={sidebarCollapsed}
+        onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
+        onLogout={handleLogout}
+        roleLabel={isAdmin ? 'Admin' : 'Front Desk'}
+      />
+      <Nav collapsed={sidebarCollapsed} isAdmin={isAdmin} />
       <div className="main-content">
         <Routes>
           <Route path="/" element={<Dashboard />} />

@@ -128,6 +128,11 @@
   --sidebar-text:#e9e9ee;
   --sidebar-muted:#b6b8c2;
 
+  /* Layout */
+  --topbar-height: 64px;
+  --sidebar-width: 260px;
+  --sidebar-width-collapsed: 72px;
+
   /* =========================================
      Kusgan Unified Buttons (global overrides)
      ========================================= */
@@ -164,6 +169,42 @@ body{
   height:100vh;
   overflow:hidden;
 }
+
+/* ---------- Topbar ---------- */
+.topbar{
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--topbar-height);
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  background: var(--light-bg);
+  border-bottom: 3px solid var(--kusgan-magenta);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+  z-index: 1000;
+}
+.topbar-left{ display:flex; align-items:center; gap: 10px; min-width: 0; }
+.topbar-center{ font-weight: 800; color: #111; text-align: center; white-space: nowrap; }
+.topbar-right{ display:flex; align-items:center; justify-content: flex-end; gap: 10px; }
+.topbar-title{ font-weight: 900; letter-spacing: 0.4px; color: #111; white-space: nowrap; }
+.topbar-logo{ width: 34px; height: 34px; object-fit: contain; }
+.topbar-role{ font-weight: 800; color: #111; white-space: nowrap; }
+.topbar-icon-btn{
+  height: 40px;
+  width: 44px;
+  border: 1px solid rgba(0,0,0,0.15);
+  border-radius: 10px;
+  background: rgba(255,255,255,0.7);
+  font-size: 18px;
+  font-weight: 900;
+  cursor: pointer;
+}
+.topbar-icon-btn:focus{ outline: none; box-shadow: var(--btn-ring); }
+.topbar-logout{ height: 40px; padding: 0 16px; font-weight: 900; }
 
 /* Panel: reusable white card used across dashboard and pages */
 .panel{
@@ -231,8 +272,12 @@ body{
 
 /* Sidebar (fixed) */
 .sidebar{
-  position:fixed; inset:0 auto 0 0;
-  width:260px; background:var(--sidebar-bg);
+  position:fixed;
+  top: var(--topbar-height);
+  left: 0;
+  bottom: 0;
+  width: var(--sidebar-width);
+  background:var(--sidebar-bg);
   border-right:1px solid var(--sidebar-border);
   color:var(--sidebar-text);
   padding:16px 12px;
@@ -241,6 +286,12 @@ body{
   flex-direction: column;
   overflow-y: hidden; /* let links area scroll instead */
 }
+
+.sidebar.collapsed{ width: var(--sidebar-width-collapsed); }
+
+.sidebar.collapsed .nav a{ justify-content: center; }
+.sidebar.collapsed .nav-label{ display: none; }
+.sidebar.collapsed .nav-icon{ font-size: 20px; }
 
 /* Make links area grow and scroll */
 .nav{
@@ -263,33 +314,19 @@ body{
 
 /* Right side (scrollable) */
 .main-content{
-  flex:1; margin-left:260px; height:100vh;
-  overflow-y:auto; padding:20px; background:var(--light-bg);
+  flex:1;
+  margin-left: var(--sidebar-width);
+  height:100vh;
+  overflow-y:auto;
+  padding: calc(var(--topbar-height) + 20px) 20px 20px;
+  background:var(--light-bg);
 }
+
+.app.sidebar-collapsed .main-content{ margin-left: var(--sidebar-width-collapsed); }
 
 /* ---------- Sidebar content ---------- */
-.brand{
-  display:flex; align-items:center; justify-content:center;
-  padding:14px 8px 18px;
-  border-bottom:1px solid var(--sidebar-border);
-  margin-bottom:10px;
-}
-.brand-logo{
-  width:140px; max-width:100%; height:auto; display:block; object-fit:contain;
-}
-
-/* Date + Primary attendant (sidebar) */
-.sidebar-info{
-  color:var(--sidebar-muted); font-size:13px;
-  margin-top:10px; margin-bottom:20px; padding-top:8px;
-  border-top:1px solid var(--sidebar-border);
-}
-.sidebar-info .date-line{ margin:2px 0; }
-.sidebar-info .today{ font-weight:400; color:var(--sidebar-text); }
-.sidebar-info .weekday{ font-weight:800; color:var(--sidebar-text); }
-.sidebar-info .mdy{ font-weight:600; color:var(--sidebar-text); }
-.sidebar-info .label{ font-weight:400; color:var(--sidebar-text); display:block; margin-top:10px; }
-.sidebar-info .name{ font-weight:900; color:var(--sidebar-text); }
+.nav-icon{ width: 28px; display: inline-flex; justify-content: center; }
+.nav-label{ display: inline-flex; }
 
 /* Nav */
 .nav a{
@@ -806,7 +843,6 @@ label.checkbox-label {
   height: 36px;
   padding: 6px 10px;
   font-size: 14px;
-.border-radius-fix-placeholder: ;
   border-radius: 8px;
 }
 .input-compact, .select-compact {
@@ -1149,14 +1185,3 @@ button[disabled],
   }
 }
 
-/* Width of your sidebar (adjust if yours is different) */
-:root { --sidebar-width: 232px; }
-
-/* App shell + content offset so content doesn't go under the sidebar */
-.app-shell { position: relative; min-height: 100vh; }
-.app-content { margin-left: var(--sidebar-width); padding: 16px; }
-
-/* On small screens, let content fill the width */
-@media (max-width: 768px) {
-  .app-content { margin-left: 0; }
-}
