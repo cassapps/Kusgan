@@ -264,13 +264,13 @@ export async function fetchMemberBundle(memberId) {
 
   const id = String(memberId).trim();
 
-  // Member doc: prefer doc id = MemberID (cheapest). Fallback to query on common fields.
+  // Member doc: prefer doc id = MemberID (cheapest). Fallback to query on a small set of common fields.
   let memberRow = null;
   try {
     memberRow = await fb.getDocById(COLS.members, id);
   } catch (e) { /* ignore */ }
   if (!memberRow) {
-    const fields = ['MemberID', 'memberId', 'memberid', 'id'];
+    const fields = ['MemberID', 'member_id', 'memberid', 'memberId', 'id'];
     for (const f of fields) {
       try {
         const hit = await fb.queryCollection(COLS.members, { wheres: [{ field: f, op: '==', value: id }], limit: 1 });
@@ -279,14 +279,26 @@ export async function fetchMemberBundle(memberId) {
     }
   }
 
+  // Query related collections by member id.
+  // To minimize reads/queries, try a canonical key first; only fall back if zero hits.
   const queryByMember = async (colName) => {
-    const fields = ['MemberID', 'memberId', 'memberid', 'member', 'id'];
+    const tryFields = ['MemberID', 'member_id', 'memberid', 'memberId', 'member'];
     const seen = new Map();
-    for (const f of fields) {
+    let any = false;
+    for (const f of tryFields) {
       try {
         const rows = await fb.queryCollection(colName, { wheres: [{ field: f, op: '==', value: id }], limit: 5000 });
-        for (const r of (rows || [])) seen.set(r.id, r);
-      } catch (e) { /* ignore */ }
+        if (rows && rows.length) {
+          any = true;
+          for (const r of rows) seen.set(r.id, r);
+          // If we got hits on a canonical field, stop early.
+          if (f === 'MemberID' || f === 'member_id') break;
+        }
+      } catch (e) {
+        /* ignore */
+      }
+      // If we already found something on a non-canonical field, don't try more.
+      if (any) break;
     }
     return Array.from(seen.values());
   };
@@ -298,6 +310,11 @@ export async function fetchMemberBundle(memberId) {
   ]);
 
   return { member: memberRow ? ({ ...memberRow }) : null, payments: paymentsFor, gymEntries: gymFor, progress: progFor };
+}
+
+export function listenMemberById(memberId, onRow, onError) {
+  if (!memberId) return () => {};
+  return fb.listenDocById(COLS.members, String(memberId), onRow, onError);
 }
 
 export async function fetchGymEntries() { return { rows: await fb.getCollection(COLS.gymEntries) }; }
@@ -353,6 +370,43 @@ export async function fetchGymEntriesForDate(dateYMD) {
           { field: 'Date', op: '<', value: end },
         ],
         limit: 2000,
+      });
+      return { rows: rowsTs || [] };
+    }
+    return { rows: [] };
+  } catch (e) {
+    return { rows: [] };
+  }
+}
+
+// Range query for gym entries (inclusive start/end), using Date string or Timestamp.
+// Prefer this over fetchGymEntriesSince when the UI has an explicit period.
+export async function fetchGymEntriesForRange({ startYMD, endYMD, limit = 6000 } = {}) {
+  const startKey = String(startYMD || '').trim();
+  const endKey = String(endYMD || '').trim();
+  if (!startKey || !endKey) return { rows: [] };
+  const endNext = ymdNext(endKey);
+  const startDay = ymdToLocalDayRange(startKey)?.start;
+  const endNextDay = endNext ? ymdToLocalDayRange(endNext)?.start : null;
+  try {
+    if (endNext) {
+      const rows = await fb.queryCollection(COLS.gymEntries, {
+        wheres: [
+          { field: 'Date', op: '>=', value: startKey },
+          { field: 'Date', op: '<', value: endNext },
+        ],
+        limit,
+      });
+      if (rows && rows.length) return { rows };
+    }
+    // Fallback: Timestamp range.
+    if (startDay && endNextDay) {
+      const rowsTs = await fb.queryCollection(COLS.gymEntries, {
+        wheres: [
+          { field: 'Date', op: '>=', value: startDay },
+          { field: 'Date', op: '<', value: endNextDay },
+        ],
+        limit,
       });
       return { rows: rowsTs || [] };
     }

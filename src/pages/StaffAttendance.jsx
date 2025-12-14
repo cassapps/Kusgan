@@ -255,18 +255,7 @@ export default function StaffAttendance() {
       const serverRows = Array.isArray(json) ? json : [];
       setRows(serverRows);
       localCache.setCached('attendance', serverRows);
-      // also fetch members so we can show nicknames in coaching sessions
-      try {
-        const mres = await api.fetchMembers();
-        const ms = (mres && (mres.rows || mres.data)) ? (mres.rows || mres.data) : (Array.isArray(mres) ? mres : []);
-        setMembers(Array.isArray(ms) ? ms : []);
-      } catch (e) { /* ignore */ }
-      // also load recent gym entries for coaching sessions panel (use shared API helper)
-      try {
-        const gres = useFirestore ? await api.fetchGymEntriesSince({ days: 180, limit: 6000 }) : await api.fetchGymEntries();
-        const gj = (gres && (gres.rows || gres.data)) ? (gres.rows || gres.data) : (Array.isArray(gres) ? gres : []);
-        setGymVisits(Array.isArray(gj) ? gj : []);
-      } catch (e) { /* ignore */ }
+      // Coaching sessions data (members + gym visits) is loaded lazily when the panel is expanded.
       // attempt to flush any pending writes
       if (!useFirestore) localCache.processQueue();
     } catch (e) { console.error('load attendance', e); setError('Failed to load attendance'); }
@@ -369,6 +358,75 @@ export default function StaffAttendance() {
       // ignore
     }
   }, [rows, gymVisits]);
+
+  // Lazy-load coaching-session dependencies only when Coaching Sessions is expanded.
+  useEffect(() => {
+    if (coachCollapsed) return;
+    let alive = true;
+
+    // Ensure members loaded for nickname display (one-time; cached).
+    (async () => {
+      try {
+        if (!alive) return;
+        if (!members || !members.length) {
+          const cachedMembers = localCache.getCached('members') || [];
+          if (cachedMembers && cachedMembers.length) setMembers(cachedMembers);
+        }
+        if (!members || !members.length) {
+          const mres = await api.fetchMembers();
+          const ms = (mres && (mres.rows || mres.data)) ? (mres.rows || mres.data) : (Array.isArray(mres) ? mres : []);
+          if (!alive) return;
+          const arr = Array.isArray(ms) ? ms : [];
+          setMembers(arr);
+          localCache.setCached('members', arr);
+        }
+      } catch (e) {
+        // ignore
+      }
+    })();
+
+    return () => { alive = false; };
+  }, [coachCollapsed]);
+
+  // Lazy-load gym visits for the selected coaching period only (cached by period).
+  useEffect(() => {
+    if (coachCollapsed) return;
+    const p = (periods || [])[coachPeriodIndex] || null;
+    if (!p || !p.start || !p.end) return;
+    let alive = true;
+
+    const cacheKey = `gymVisits:${p.start}:${p.end}`;
+    try {
+      const cached = localCache.getCached(cacheKey) || [];
+      if (cached && cached.length) setGymVisits(cached);
+    } catch (e) { /* ignore */ }
+
+    (async () => {
+      try {
+        const gres = useFirestore
+          ? (typeof api.fetchGymEntriesForRange === 'function'
+              ? await api.fetchGymEntriesForRange({ startYMD: p.start, endYMD: p.end, limit: 6000 })
+              : await api.fetchGymEntriesSince({ days: 45, limit: 6000 }))
+          : await api.fetchGymEntries();
+        const gj = (gres && (gres.rows || gres.data)) ? (gres.rows || gres.data) : (Array.isArray(gres) ? gres : []);
+        if (!alive) return;
+        const arr = Array.isArray(gj) ? gj : [];
+        // If we used a broad fallback (since), filter down to the selected range.
+        const filtered = useFirestore
+          ? arr.filter((r) => {
+              const ymd = rowDateYMD(r) || '';
+              return ymd && ymd >= p.start && ymd <= p.end;
+            })
+          : arr;
+        setGymVisits(filtered);
+        localCache.setCached(cacheKey, filtered);
+      } catch (e) {
+        // ignore
+      }
+    })();
+
+    return () => { alive = false; };
+  }, [coachCollapsed, coachPeriodIndex, periods, useFirestore]);
 
   const attendanceStaffOptions = useMemo(() => {
     try {

@@ -10,7 +10,7 @@ import useManilaDayKey from "../lib/useManilaDayKey.js";
 
 const {
   fetchMembers,
-  listenMembers,
+  fetchMemberByIdFresh,
   listenPaymentsForMonth,
   fetchPaymentsForMonth,
   fetchExpensesForMonth,
@@ -120,7 +120,8 @@ export default function Reports() {
     }
     lastDefaultMonthRef.current = defaultMonthKey;
   }, [defaultMonthKey, selectedMonthKey]);
-  const [members, setMembers] = useState([]);
+  const [members, setMembers] = useState([]); // legacy only
+  const [membersById, setMembersById] = useState({}); // Firestore mode
   const [paymentsMonth, setPaymentsMonth] = useState([]);
   const [revenuesMonth, setRevenuesMonth] = useState([]);
   const [expensesMonth, setExpensesMonth] = useState([]);
@@ -172,11 +173,23 @@ export default function Reports() {
         }
       };
       try {
-        unsub = listenLatestPayment((row) => {
+        unsub = listenLatestPayment(async (row) => {
           const id = String(row?.id || row?._id || '').trim();
           if (!id) return;
           if (lastId && id === lastId) return;
           lastId = id;
+
+          // Patch cache for the affected member (keeps names/pills up-to-date without a full members listener).
+          try {
+            const mid = String(row?.MemberID || row?.member_id || row?.memberid || row?.memberId || row?.member || '').trim();
+            if (mid && typeof fetchMemberByIdFresh === 'function') {
+              const m = await fetchMemberByIdFresh(mid);
+              if (m) setMembersById((prev) => ({ ...(prev || {}), [mid]: m }));
+            }
+          } catch (e) {
+            // ignore
+          }
+
           const mk = toMonthKey(row);
           if (mk) {
             setTotalsByMonth((prev) => {
@@ -191,7 +204,7 @@ export default function Reports() {
         unsub = null;
       }
       return () => { try { unsub && unsub(); } catch (e) {} };
-    }, [useFirestore, listenLatestPayment]);
+    }, [useFirestore, listenLatestPayment, fetchMemberByIdFresh]);
   const [revBusy, setRevBusy] = useState(false);
   const [expBusy, setExpBusy] = useState(false);
   const [revErr, setRevErr] = useState("");
@@ -210,19 +223,41 @@ export default function Reports() {
       })();
       return;
     }
-
-    let unsub = null;
-    try {
-      unsub = listenMembers((rows) => setMembers(rows || []), () => {});
-    } catch (e) {
-      unsub = null;
-    }
-    return () => {
-      try {
-        unsub && unsub();
-      } catch (e) {}
-    };
+    // Firestore mode: do NOT subscribe to the full members collection.
+    // We fetch/cache only the member docs referenced by the month’s payment rows.
+    setMembers([]);
   }, [useFirestore]);
+
+  // In Firestore mode, ensure we have member rows for the current month’s payment rows.
+  useEffect(() => {
+    if (!useFirestore) return;
+    if (typeof fetchMemberByIdFresh !== 'function') return;
+    let alive = true;
+    const ids = Array.from(new Set(
+      (paymentsMonth || [])
+        .map((p) => String(p?.MemberID || p?.member_id || p?.memberid || p?.memberId || p?.member || '').trim())
+        .filter(Boolean)
+    ));
+    if (!ids.length) return;
+
+    (async () => {
+      // fetch missing members only
+      for (const id of ids) {
+        if (!alive) return;
+        const already = membersById && Object.prototype.hasOwnProperty.call(membersById, id);
+        if (already) continue;
+        try {
+          const row = await fetchMemberByIdFresh(id);
+          if (!alive || !row) continue;
+          setMembersById((prev) => ({ ...(prev || {}), [id]: row }));
+        } catch (e) {
+          // ignore
+        }
+      }
+    })();
+
+    return () => { alive = false; };
+  }, [useFirestore, paymentsMonth, fetchMemberByIdFresh, membersById]);
 
   // Monthly payments rows for the table (realtime in Firestore mode).
   useEffect(() => {
@@ -420,10 +455,9 @@ export default function Reports() {
       const p = it.row || {};
       const isManual = it.kind === 'revenue';
       const pid = String(p.MemberID || p.member_id || p.id || p.member || "").trim();
-      const member = !isManual ? (members || []).find((m) => {
-        if (!pid) return false;
-        return String(m.MemberID || m.member_id || m.id || "").trim() === pid;
-      }) : null;
+      const member = !isManual
+        ? (useFirestore ? (membersById?.[pid] || null) : (members || []).find((m) => String(m.MemberID || m.member_id || m.id || "").trim() === pid))
+        : null;
       const memberId = !isManual ? String(member?.MemberID || member?.member_id || member?.id || pid || "").trim() : "";
       const paidRaw = candidates(p);
       const nickCell = isManual ? (p.Category || p.category || '-') : displayName(member);
@@ -477,7 +511,7 @@ export default function Reports() {
         </tr>
       );
     });
-  }, [paymentsMonth, revenuesMonth, members]);
+  }, [paymentsMonth, revenuesMonth, members, membersById, useFirestore]);
 
   const revenuePager = useLoadMore(monthlyRows, { initial: 20, step: 20, resetDeps: [selectedMonthKey, revCollapsed] });
 

@@ -7,7 +7,22 @@ import ProgressModal from "../components/ProgressModal";
 import ProgressViewModal from "../components/ProgressViewModal";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import api from "../api";
-const { fetchMembers, fetchPayments, fetchGymEntries, fetchProgressTracker, fetchMemberBundle, fetchPricing, fetchMemberById, fetchMemberByIdFresh, addPayment } = api;
+const {
+  fetchMembers,
+  fetchPayments,
+  fetchGymEntries,
+  fetchProgressTracker,
+  fetchMemberBundle,
+  fetchPricing,
+  fetchMemberById,
+  fetchMemberByIdFresh,
+  fetchLatestPaymentForMember,
+  fetchGymEntriesForDate,
+  listenLatestPayment,
+  listenGymEntriesForDate,
+  listenMemberById,
+  addPayment,
+} = api;
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { ensureFirebase } from '../lib/firebase';
 import { isAdminUid } from '../lib/admin';
@@ -324,9 +339,14 @@ export default function MemberDetail() {
       }
 
       try {
-  let data;
-  try { data = await loadViaBundleFresh(); }
-        catch { data = await loadViaLegacy(); }
+        let data;
+        // In Firestore mode, never fall back to full collection scans.
+        if (useFirestore) {
+          data = await loadViaBundleFresh();
+        } else {
+          try { data = await loadViaBundleFresh(); }
+          catch { data = await loadViaLegacy(); }
+        }
 
         if (!alive) return;
 
@@ -423,6 +443,164 @@ export default function MemberDetail() {
       try { if (refreshTimer.current) { clearTimeout(refreshTimer.current); refreshTimer.current = null; } } catch(e) {}
     };
   }, [memberIdParam, idParam, passed]);
+
+  // Firestore mode: keep this detail view up-to-date across devices with scoped listeners.
+  useEffect(() => {
+    if (!useFirestore) return;
+    const routeId = decodeURIComponent(memberIdParam || idParam || '').trim();
+    const passedId = String(firstOf(passed || {}, ["memberid","member_id","id"]) || '').trim();
+    const targetId = routeId || passedId;
+    if (!targetId) return;
+
+    let alive = true;
+    let unsubMember = null;
+    let unsubGymToday = null;
+    let unsubLatestPay = null;
+
+    // 1) Member doc listener (single doc)
+    try {
+      if (typeof listenMemberById === 'function') {
+        unsubMember = listenMemberById(targetId, (row) => {
+          if (!alive || !row) return;
+          try {
+            const n = norm(row);
+            setMember((prev) => ({ ...(prev || {}), ...(n || {}) }));
+          } catch (e) {
+            // ignore
+          }
+        }, () => {});
+      }
+    } catch (e) {
+      unsubMember = null;
+    }
+
+    // 2) Today's gym entries listener (small query) -> update only today's rows for this member
+    try {
+      const todayYMD = new Intl.DateTimeFormat('en-CA', { timeZone: MANILA_TZ, year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date());
+      if (typeof listenGymEntriesForDate === 'function') {
+        unsubGymToday = listenGymEntriesForDate(todayYMD, (rows) => {
+          if (!alive) return;
+          const mine = (rows || []).filter((r) => {
+            const mid = String(r?.MemberID || r?.member_id || r?.memberid || r?.memberId || r?.id || '').trim();
+            return mid && mid.toLowerCase() === String(targetId).trim().toLowerCase();
+          });
+          if (!mine.length) return;
+
+          // Merge into rawGyms and visits, replacing any existing rows for today.
+          setRawGyms((prev) => {
+            const arr = Array.isArray(prev) ? prev : [];
+            const keep = arr.filter((r) => {
+              try {
+                const n = norm(r || {});
+                const mid = String(firstOf(n, ['memberid','member_id','MemberID','id']) || '').trim();
+                if (!mid || mid.toLowerCase() !== String(targetId).trim().toLowerCase()) return true;
+                const dval = firstOf(n, ['date','Date','log_date','date_time','timestamp','created','TimeIn','time_in']);
+                const d = asDate(dval);
+                if (!d) return true;
+                const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: MANILA_TZ, year:'numeric', month:'2-digit', day:'2-digit' }).format(d);
+                return ymd !== todayYMD;
+              } catch {
+                return true;
+              }
+            });
+            return [...mine, ...keep];
+          });
+
+          setVisits((prev) => {
+            const arr = Array.isArray(prev) ? prev : [];
+            const keep = arr.filter((v) => {
+              try {
+                const d = v?.date;
+                if (!d) return true;
+                const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: MANILA_TZ, year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date(d));
+                const mid = String(v?.memberId || '').trim();
+                if (mid && mid.toLowerCase() === String(targetId).trim().toLowerCase() && ymd === todayYMD) return false;
+                return true;
+              } catch {
+                return true;
+              }
+            });
+            const mapped = mine.map((r) => {
+              const n = norm(r);
+              return {
+                date: asDate(firstOf(n, ['date','Date','timestamp','created','TimeIn','time_in'])),
+                timeIn: firstOf(n, ['timein','time_in','TimeIn']),
+                timeOut: firstOf(n, ['timeout','time_out','TimeOut']),
+                totalHours: firstOf(n, ['totalhours','total_hours','hours']),
+                coach: firstOf(n, ['coach','Coach']),
+                focus: firstOf(n, ['focus','Focus']),
+                raw: r,
+                memberId: String(firstOf(n, ['memberid','member_id','MemberID','id']) || '').trim(),
+              };
+            }).filter((x) => !!x.date);
+            const next = [...mapped, ...keep].sort((a, b) => (b?.date || 0) - (a?.date || 0));
+            return next;
+          });
+        }, () => {});
+      } else if (typeof fetchGymEntriesForDate === 'function') {
+        // fallback: one-time fetch of today if listener isn't available
+        (async () => {
+          try {
+            const todayYMD = new Intl.DateTimeFormat('en-CA', { timeZone: MANILA_TZ, year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date());
+            const res = await fetchGymEntriesForDate(todayYMD);
+            const rows = res?.rows || res?.data || [];
+            if (!alive || !Array.isArray(rows)) return;
+            // reuse same merging logic by calling the setter once
+            const mine = rows.filter((r) => String(r?.MemberID || r?.member_id || r?.memberid || r?.memberId || r?.id || '').trim().toLowerCase() === String(targetId).trim().toLowerCase());
+            if (!mine.length) return;
+            setRawGyms((prev) => [...mine, ...(Array.isArray(prev) ? prev : [])]);
+          } catch {}
+        })();
+      }
+    } catch (e) {
+      unsubGymToday = null;
+    }
+
+    // 3) Latest payment listener -> fetch just the latest payment row + recompute status
+    try {
+      if (typeof listenLatestPayment === 'function') {
+        unsubLatestPay = listenLatestPayment(async (row) => {
+          if (!alive) return;
+          const mid = String(row?.MemberID || row?.member_id || row?.memberid || row?.memberId || row?.member || row?.id || '').trim();
+          if (!mid || mid.toLowerCase() !== String(targetId).trim().toLowerCase()) return;
+
+          try {
+            // Update member doc (end-dates) and latest payment row without refetching everything.
+            const [freshMember, latestPayRes, pricingRes] = await Promise.all([
+              (typeof fetchMemberByIdFresh === 'function') ? fetchMemberByIdFresh(targetId) : Promise.resolve(null),
+              (typeof fetchLatestPaymentForMember === 'function') ? fetchLatestPaymentForMember(targetId) : Promise.resolve(null),
+              fetchPricing(),
+            ]);
+            if (!alive) return;
+            if (freshMember) setMember((prev) => ({ ...(prev || {}), ...(norm(freshMember) || {}) }));
+            const latestPay = latestPayRes?.row ? norm(latestPayRes.row) : null;
+            if (latestPay) {
+              setPayments((prev) => {
+                const arr = Array.isArray(prev) ? prev : [];
+                const id = String(latestPay?.id || latestPay?._id || '').trim();
+                const next = id ? [latestPay, ...arr.filter((p) => String(p?.id || p?._id || '').trim() !== id)] : [latestPay, ...arr];
+                return next;
+              });
+            }
+            const pricingRows = (pricingRes?.rows || pricingRes?.data || []).map((r) => r);
+            const curMember = freshMember ? norm(freshMember) : (member || null);
+            if (curMember) setStatus(computeStatusForMember(latestPay ? [latestPay, ...payments] : payments, curMember, pricingRows));
+          } catch {
+            // ignore
+          }
+        }, () => {});
+      }
+    } catch (e) {
+      unsubLatestPay = null;
+    }
+
+    return () => {
+      alive = false;
+      try { unsubMember && unsubMember(); } catch (e) {}
+      try { unsubGymToday && unsubGymToday(); } catch (e) {}
+      try { unsubLatestPay && unsubLatestPay(); } catch (e) {}
+    };
+  }, [useFirestore, memberIdParam, idParam, passed]);
 
 
   if (loading) return <div className="content"><LoadingSkeleton /></div>;

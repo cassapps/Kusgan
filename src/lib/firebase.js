@@ -145,6 +145,30 @@ export function listenCollection(name, callback, onError) {
   return listenQueryCollection(name, {}, callback, onError);
 }
 
+// Realtime listener for a single document by id.
+// callback receives a single object ({id, ...data}) or null if it doesn't exist.
+export function listenDocById(colName, id, callback, onError) {
+  try {
+    const ref = docRef(colName, id);
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        try {
+          if (!snap.exists()) return callback && callback(null);
+          callback && callback({ id: snap.id, ...snap.data() });
+        } catch (e) {
+          onError && onError(e);
+        }
+      },
+      (err) => onError && onError(err)
+    );
+    return unsub;
+  } catch (e) {
+    onError && onError(e);
+    return () => {};
+  }
+}
+
 export function getStorageInstance() {
   ensureFirebase();
   return storage;
@@ -209,6 +233,7 @@ export default {
   queryCollection,
   listenQueryCollection,
   listenCollection,
+  listenDocById,
   getDocById,
   addDocument,
   setDocument,

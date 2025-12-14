@@ -5,6 +5,7 @@ const {
   fetchMembers,
   fetchMemberByIdFresh,
   fetchPayments,
+  fetchPaymentsActive,
   fetchGymEntries,
   fetchGymEntriesFresh,
   fetchGymEntriesSince,
@@ -582,16 +583,21 @@ export default function Dashboard() {
 
     (async () => {
       try {
-        const [pr, mres] = await Promise.all([
+        const paymentsActivePromise = (typeof fetchPaymentsActive === 'function')
+          ? fetchPaymentsActive({ limit: 4000 }).catch(() => ({ rows: [] }))
+          : Promise.resolve({ rows: [] });
+
+        const [pr, mres, pAct] = await Promise.all([
           fetchPricing(),
           fetchMembers(),
+          paymentsActivePromise,
         ]);
         if (!alive) return;
         setPricing(pr?.rows || pr?.data || []);
         setMembers(mres?.rows || mres?.data || []);
-        // We intentionally avoid a broad paymentsActive listener in Firestore mode.
-        // Active status is derived primarily from member-level end-date fields.
-        setPaymentsActive([]);
+        // Firestore mode: load currently-active payments (bounded) so active counts are correct
+        // even if older member docs haven't been backfilled with validity fields yet.
+        setPaymentsActive(pAct?.rows || pAct?.data || []);
       } catch (e) {
         // ignore
       } finally {

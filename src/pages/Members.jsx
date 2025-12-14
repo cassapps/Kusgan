@@ -265,17 +265,23 @@ export default function Members() {
     return () => window.removeEventListener('resize', recompute);
   }, []);
 
-  // SWR fetcher: fetch members + active payments + gymEntries
+  // SWR fetcher: fetch members (+ bounded active payments in Firestore mode) + pricing
   const membersFetcher = async () => {
-    // Firestore mode: minimize reads. We rely on member-level validity/end-date fields.
+    // Firestore mode: minimize reads but still compute correct active statuses.
+    // We load only currently-active payments (bounded) to avoid full payment scans.
     if (useFirestore) {
-      const [mRes, prRes] = await Promise.all([
+      const paymentsPromise = (typeof api.fetchPaymentsActive === 'function')
+        ? api.fetchPaymentsActive({ limit: 4000 }).catch(() => ({ rows: [] }))
+        : Promise.resolve({ rows: [] });
+
+      const [mRes, prRes, pRes] = await Promise.all([
         api.fetchMembers(),
         api.fetchPricing(),
+        paymentsPromise,
       ]);
       return {
         members: (mRes?.rows ?? mRes?.data ?? []).map(normRow),
-        payments: [],
+        payments: (pRes?.rows ?? pRes?.data ?? []),
         gymEntries: [],
         pricing: (prRes?.rows ?? prRes?.data ?? []),
       };
@@ -317,7 +323,7 @@ export default function Members() {
       setRows(data.members || []);
       setPricingRows(data.pricing || []);
       paymentsRef.current = data.payments || [];
-      // In Firestore mode we intentionally do NOT bulk-load payments; status is derived from member fields.
+      // In Firestore mode we load only active payments (bounded) so active status is correct.
       setPayIdx(buildStatusIndex({ membersRaw: data.members || [], paymentsRaw: data.payments || [], pricingRows: data.pricing || [] }));
 
       // Prefer member-level last visit for Firestore mode; legacy mode still uses gym entries.
@@ -426,7 +432,16 @@ export default function Members() {
       setPayIdx((prev) => {
         const next = new Map(prev);
         try {
-          next.set(mid, computeStatusForMember([], freshNorm, pricingRows || []));
+          const pays = (paymentsRef.current || []).filter((p) => {
+            try {
+              const n = normRow(p);
+              const pid = String(firstOf(n, ["memberid","member_id","id","member_id_"]) || '').trim();
+              return pid === mid;
+            } catch {
+              return false;
+            }
+          });
+          next.set(mid, computeStatusForMember(pays, freshNorm, pricingRows || []));
         } catch (_) {}
         return next;
       });
