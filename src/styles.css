@@ -295,7 +295,7 @@ body{
   left: 0;
   bottom: 0;
   width: var(--sidebar-width);
-  background: #4b5563;
+  background: #000;
   border-right: 1px solid var(--sidebar-border);
   color: #fff;
   padding:16px 12px;
