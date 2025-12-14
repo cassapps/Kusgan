@@ -71,6 +71,74 @@ const rowDateYMD = (r) => {
   } catch (e) { return ''; }
 };
 
+const monthShort = (monthIndex) => {
+  const names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return names[monthIndex] || '';
+};
+
+const ymdFromPartsManila = (year, monthIndex0, day) => {
+  const mm = String(monthIndex0 + 1).padStart(2, '0');
+  const dd = String(day).padStart(2, '0');
+  const d = new Date(`${year}-${mm}-${dd}T00:00:00+08:00`);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: MANILA_TZ }).format(d);
+};
+
+const ymdToManilaDate = (ymd) => {
+  try {
+    const s = String(ymd || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+    return new Date(s + 'T00:00:00+08:00');
+  } catch {
+    return null;
+  }
+};
+
+const lastDayOfMonth = (year, monthIndex0) => new Date(Date.UTC(year, monthIndex0 + 1, 0)).getUTCDate();
+
+// Half-month periods: 1-15 and 16-(end of month), inclusive.
+const generateHalfMonthPeriodsBetween = (startYMD, endYMD) => {
+  try {
+    const startDate = ymdToManilaDate(startYMD);
+    const endDate = ymdToManilaDate(endYMD);
+    if (!startDate || !endDate || isNaN(startDate) || isNaN(endDate)) return [];
+
+    const out = [];
+    let year = startDate.getFullYear();
+    let month = startDate.getMonth();
+    // start at the month of startDate
+    while (true) {
+      const ld = lastDayOfMonth(year, month);
+      const mName = monthShort(month);
+      out.push({
+        label: `${mName} 1-15, ${year}`,
+        start: ymdFromPartsManila(year, month, 1),
+        end: ymdFromPartsManila(year, month, 15),
+      });
+      out.push({
+        label: `${mName} 16-${ld}, ${year}`,
+        start: ymdFromPartsManila(year, month, 16),
+        end: ymdFromPartsManila(year, month, ld),
+      });
+
+      // advance month
+      const next = new Date(Date.UTC(year, month + 1, 1));
+      year = next.getUTCFullYear();
+      month = next.getUTCMonth();
+
+      const nextMonthStart = ymdToManilaDate(ymdFromPartsManila(year, month, 1));
+      if (!nextMonthStart || nextMonthStart > endDate) break;
+    }
+
+    // Filter to only those that overlap [startYMD, endYMD]
+    const filtered = out.filter((p) => p.end >= startYMD && p.start <= endYMD);
+    // Sort newest first
+    filtered.sort((a, b) => b.start.localeCompare(a.start));
+    return filtered;
+  } catch {
+    return [];
+  }
+};
+
 export default function StaffAttendance() {
   const useFirestore = String(import.meta.env.VITE_USE_FIRESTORE ?? 'true') === 'true';
   const [selected, setSelected] = useState('');
@@ -136,11 +204,21 @@ export default function StaffAttendance() {
   // today's date in YYYY-MM-DD (Manila) to scope 'On' badges to today only
   const todayYMDManila = new Intl.DateTimeFormat('en-CA', { timeZone: MANILA_TZ }).format(new Date());
 
+  // Collapse controls (match Reports UX)
+  const [attCollapsed, setAttCollapsed] = useState(true);
+  const [coachCollapsed, setCoachCollapsed] = useState(true);
+
+  // Shared half-month periods for both tables
+  const [periods, setPeriods] = useState([]);
+  const [attPeriodIndex, setAttPeriodIndex] = useState(0);
+  const [coachPeriodIndex, setCoachPeriodIndex] = useState(0);
+
   // Coaching sessions UI state
   const COACHES = ['Coach Jojo', 'Coach Elmer'];
   const [selectedCoach, setSelectedCoach] = useState(COACHES[0]);
-  const [periods, setPeriods] = useState([]);
-  const [selectedPeriodIndex, setSelectedPeriodIndex] = useState(0);
+
+  // Attendance table filter state
+  const [attStaffFilter, setAttStaffFilter] = useState('');
 
   // derive coach options from gymVisits where possible so dropdown reflects actual data
   const coachOptions = useMemo(() => {
@@ -165,95 +243,94 @@ export default function StaffAttendance() {
     } catch (e) { /* ignore */ }
   }, [coachOptions]);
 
-  // Generate half-month periods between two dates (inclusive)
-  const generateHalfMonthPeriodsBetween = (startDate, endDate) => {
-    try {
-      if (!startDate || !endDate) return [];
-      const s = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
-      const e = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
-      const out = [];
-      let cur = new Date(s);
-      while (cur <= e) {
-        const year = cur.getFullYear();
-        const month = cur.getMonth();
-        const first = new Date(year, month, 1);
-        const mid = new Date(year, month, 15);
-        const last = new Date(year, month + 1, 0);
-        out.push({
-          label: `${first.toLocaleString('en-US', { month: 'short' })} 1-15, ${year}`,
-          start: new Intl.DateTimeFormat('en-CA', { timeZone: MANILA_TZ }).format(first),
-          end: new Intl.DateTimeFormat('en-CA', { timeZone: MANILA_TZ }).format(mid),
-        });
-        out.push({
-          label: `${first.toLocaleString('en-US', { month: 'short' })} 16-${last.getDate()}, ${year}`,
-          start: new Intl.DateTimeFormat('en-CA', { timeZone: MANILA_TZ }).format(new Date(year, month, 16)),
-          end: new Intl.DateTimeFormat('en-CA', { timeZone: MANILA_TZ }).format(last),
-        });
-        // advance to next month
-        cur = new Date(year, month + 1, 1);
-      }
-      // dedupe
-      const unique = [];
-      for (const p of out) if (!unique.find(u => u.label === p.label)) unique.push(p);
-      return unique;
-    } catch (e) { return []; }
-  };
-
-  // Regenerate periods when gymVisits load; use earliest entry as start
+  // Build shared periods list (based on earliest available date; fallback to previous-month second-half)
   useEffect(() => {
     try {
-      if (!gymVisits || gymVisits.length === 0) {
-        // fallback: generate recent periods for usability
-        const now = new Date();
-        const ps = generateHalfMonthPeriodsBetween(new Date(now.getFullYear(), now.getMonth() - 3, 1), now);
-        setPeriods(ps);
-        const today = todayYMDManila;
-        const idx = ps.findIndex(p => (p.start <= today && p.end >= today));
-        if (idx >= 0) setSelectedPeriodIndex(idx);
-        return;
-      }
-      // find earliest date in gymVisits
-      let minDate = null;
-      for (const r of gymVisits) {
-        const ymd = rowDateYMD(r) || '';
-        if (!ymd) continue;
-        const d = new Date(ymd + 'T00:00:00');
-        if (isNaN(d)) continue;
-        if (!minDate || d < minDate) minDate = d;
-      }
-      const now = new Date();
-      const start = minDate || new Date(now.getFullYear(), now.getMonth(), 1);
-      const ps = generateHalfMonthPeriodsBetween(start, now);
-      setPeriods(ps);
       const today = todayYMDManila;
-      const idx = ps.findIndex(p => (p.start <= today && p.end >= today));
-      if (idx >= 0) setSelectedPeriodIndex(idx);
-    } catch (e) {
+      let minYMD = '';
+      const consider = (r) => {
+        const ymd = rowDateYMD(r) || '';
+        if (!ymd) return;
+        if (!minYMD || ymd < minYMD) minYMD = ymd;
+      };
+      (rows || []).forEach(consider);
+      (gymVisits || []).forEach(consider);
+
+      if (!minYMD) {
+        const now = new Date();
+        const prev = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 16));
+        const prevY = prev.getUTCFullYear();
+        const prevM = prev.getUTCMonth();
+        minYMD = ymdFromPartsManila(prevY, prevM, 16);
+      } else {
+        const d = ymdToManilaDate(minYMD);
+        if (d) {
+          const y = d.getFullYear();
+          const m = d.getMonth();
+          const day = d.getDate();
+          minYMD = (day <= 15) ? ymdFromPartsManila(y, m, 1) : ymdFromPartsManila(y, m, 16);
+        }
+      }
+
+      const ps = generateHalfMonthPeriodsBetween(minYMD, today);
+      setPeriods(ps);
+
+      const curIdx = ps.findIndex((p) => p.start <= today && p.end >= today);
+      const idx = curIdx >= 0 ? curIdx : 0;
+      setAttPeriodIndex((v) => (Number.isFinite(v) && v >= 0 && v < ps.length ? v : idx));
+      setCoachPeriodIndex((v) => (Number.isFinite(v) && v >= 0 && v < ps.length ? v : idx));
+    } catch {
       // ignore
     }
-  }, [gymVisits]);
+  }, [rows, gymVisits]);
 
-  const visibleRows = useMemo(() => {
+  const attendanceStaffOptions = useMemo(() => {
     try {
-      const cutoff = (() => { const d = new Date(); d.setDate(d.getDate() - 19); return new Intl.DateTimeFormat('en-CA', { timeZone: MANILA_TZ }).format(d); })();
-      return (rows || []).filter(r => {
+      const s = new Set();
+      (rows || []).forEach((r) => {
+        const name = String(r?.Staff || r?.staff || r?.staff_name || '').trim();
+        if (name) s.add(name);
+      });
+      const arr = Array.from(s);
+      return arr.length ? arr : STAFF;
+    } catch {
+      return STAFF;
+    }
+  }, [rows]);
+
+  const attendanceRows = useMemo(() => {
+    try {
+      if (!periods || periods.length === 0) return [];
+      const p = periods[attPeriodIndex] || periods[0];
+      const start = p?.start || '';
+      const end = p?.end || '';
+      const staffFilter = String(attStaffFilter || '').trim();
+      const staffKey = staffFilter ? staffFilter.toLowerCase().replace(/\s+/g, '') : '';
+      return (rows || []).filter((r) => {
         const ymd = rowDateYMD(r) || '';
-        return ymd && ymd >= cutoff && (r.Staff || r.staff || r.staff_name);
-      }).sort((a,b) => {
+        if (!ymd || ymd < start || ymd > end) return false;
+        const staffName = String(r?.Staff || r?.staff || r?.staff_name || '').trim();
+        if (!staffName) return false;
+        if (!staffKey) return true;
+        const sKey = staffName.toLowerCase().replace(/\s+/g, '');
+        return sKey.includes(staffKey) || staffKey.includes(sKey);
+      }).sort((a, b) => {
         const aKey = (rowDateYMD(a) || '0000-00-00') + 'T' + (String(a?.TimeIn || a?.time_in || '00:00'));
         const bKey = (rowDateYMD(b) || '0000-00-00') + 'T' + (String(b?.TimeIn || b?.time_in || '00:00'));
         return bKey.localeCompare(aKey);
       });
-    } catch (e) { return []; }
-  }, [rows]);
+    } catch {
+      return [];
+    }
+  }, [rows, periods, attPeriodIndex, attStaffFilter]);
 
-  const attendancePager = useLoadMore(visibleRows, { initial: 20, step: 20, resetDeps: [selected, visibleRows.length] });
+  const attendancePager = useLoadMore(attendanceRows, { initial: 20, step: 20, resetDeps: [attStaffFilter, attPeriodIndex, attCollapsed, attendanceRows.length] });
 
   // Filtered coaching sessions for the selected coach & period
   const coachingSessions = useMemo(() => {
     try {
       if (!periods || periods.length === 0) return [];
-      const p = periods[selectedPeriodIndex] || periods[0];
+      const p = periods[coachPeriodIndex] || periods[0];
       const start = p?.start || '';
       const end = p?.end || '';
       const filtered = (gymVisits || []).filter(rv => {
@@ -272,9 +349,9 @@ export default function StaffAttendance() {
       }).sort((a,b) => (String(b?.TimeIn||b?.time_in||'').localeCompare(String(a?.TimeIn||a?.time_in||''))));
       return filtered;
     } catch (e) { return []; }
-  }, [gymVisits, periods, selectedCoach, selectedPeriodIndex]);
+  }, [gymVisits, periods, selectedCoach, coachPeriodIndex]);
 
-  const coachingPager = useLoadMore(coachingSessions, { initial: 20, step: 20, resetDeps: [selectedCoach, selectedPeriodIndex, coachingSessions.length] });
+  const coachingPager = useLoadMore(coachingSessions, { initial: 20, step: 20, resetDeps: [selectedCoach, coachPeriodIndex, coachCollapsed, coachingSessions.length] });
 
   const onClock = async () => {
     if (!selected) return;
@@ -341,131 +418,157 @@ export default function StaffAttendance() {
       </div>
 
       <div className="panel">
-        <div className="panel-header">Attendance Records</div>
-        {error && <div className="small-error">{error}</div>}
-        <div style={{ overflowX: 'auto', padding: 8 }}>
-          <table className="attendance-table aligned" style={{ width: '100%' }}>
-            <thead>
-                <tr>
-                <th>Date</th>
-                <th>Staff</th>
-                <th>Time In</th>
-                <th>Time Out</th>
-                <th style={{ textAlign: 'center' }}>Total Hours</th>
-              </tr>
-            </thead>
-            <tbody>
-              {attendancePager.visible.length === 0 ? (
-                <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--muted)' }}>No records.</td></tr>
-              ) : attendancePager.visible.map((r, i) => {
-                const ymd = rowDateYMD(r) || '';
-                const tinDisp = displayTime(r);
-                const toutIso = r?.time_out || r?.TimeOut || r?.timeOut || '';
-                const toutDisp = toutIso ? (toutIso.length === 5 ? displayTime({ TimeIn: toutIso }) : fmtTime(toutIso)) : '—';
-                const hours = (typeof r?.TotalHours !== 'undefined' && r?.TotalHours !== null) ? String(r?.TotalHours)
-                  : (typeof r?.NoOfHours !== 'undefined' && r?.NoOfHours !== null) ? String(r?.NoOfHours)
-                  : (typeof r?.hours !== 'undefined' && r?.hours !== null) ? String(r?.hours)
-                  : '—';
-                // determine if this entry is currently "on" (no sign-out) and is for today
-                const toutRaw = String(r?.TimeOut || r?.time_out || r?.timeout || '').trim();
-                const noOut = toutRaw === '' || toutRaw === '-' || toutRaw === '—' || toutRaw === 'null' || typeof toutRaw === 'undefined';
-                const staffName = String(r?.Staff || r?.staff || r?.staff_name || '');
-                const isToday = (rowDateYMD(r) || '') === todayYMDManila;
-                return (
-                  <tr key={(ymd || '') + '|' + (String(r?.Staff || r?.staff || i))}>
-                    <td>{fmtDate(ymd)}</td>
-                    <td style={{ fontWeight: 700 }}>
-                          {staffName}{noOut && isToday && <span style={{ marginLeft: 8 }} className="status-badge on">On</span>}
-                    </td>
-                    <td>{tinDisp}</td>
-                    <td>{toutDisp}</td>
-                    <td style={{ textAlign: 'center' }}>{hours}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        {attendancePager.canLoadMore && (
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8, paddingRight: 8 }}>
-            <button className="load-more-link" type="button" onClick={attendancePager.loadMore}>
-              Load 20 more
+        <div className="panel-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <span>Attendance Records</span>
+          <div style={{ display: 'inline-flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button className="button" type="button" onClick={() => setAttCollapsed(v => !v)} style={{ background: '#eee', color: '#333' }}>
+              {attCollapsed ? 'Expand' : 'Collapse'}
             </button>
+            <select value={attStaffFilter} onChange={(e) => setAttStaffFilter(e.target.value)} style={{ height: 44, padding: '8px 12px', border: '1px solid #e7e8ef', borderRadius: 10, fontSize: 16, minWidth: 220 }}>
+              <option value="">All Staff</option>
+              {attendanceStaffOptions.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+            <select value={attPeriodIndex} onChange={(e) => setAttPeriodIndex(Number(e.target.value))} style={{ height: 44, padding: '8px 12px', border: '1px solid #e7e8ef', borderRadius: 10, fontSize: 16, minWidth: 220 }}>
+              {(periods || []).map((p, i) => (
+                <option key={p.label} value={i}>{p.label}</option>
+              ))}
+            </select>
           </div>
+        </div>
+        {error && <div className="small-error">{error}</div>}
+        {!attCollapsed && (
+          <>
+            <div style={{ overflowX: 'auto', padding: 8 }}>
+              <table className="attendance-table aligned" style={{ width: '100%' }}>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Staff</th>
+                    <th>Time In</th>
+                    <th>Time Out</th>
+                    <th style={{ textAlign: 'center' }}>Total Hours</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {attendancePager.visible.length === 0 ? (
+                    <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--muted)' }}>No records.</td></tr>
+                  ) : attendancePager.visible.map((r, i) => {
+                    const ymd = rowDateYMD(r) || '';
+                    const tinDisp = displayTime(r);
+                    const toutIso = r?.time_out || r?.TimeOut || r?.timeOut || '';
+                    const toutDisp = toutIso ? (toutIso.length === 5 ? displayTime({ TimeIn: toutIso }) : fmtTime(toutIso)) : '—';
+                    const hours = (typeof r?.TotalHours !== 'undefined' && r?.TotalHours !== null) ? String(r?.TotalHours)
+                      : (typeof r?.NoOfHours !== 'undefined' && r?.NoOfHours !== null) ? String(r?.NoOfHours)
+                      : (typeof r?.hours !== 'undefined' && r?.hours !== null) ? String(r?.hours)
+                      : '—';
+                    // determine if this entry is currently "on" (no sign-out) and is for today
+                    const toutRaw = String(r?.TimeOut || r?.time_out || r?.timeout || '').trim();
+                    const noOut = toutRaw === '' || toutRaw === '-' || toutRaw === '—' || toutRaw === 'null' || typeof toutRaw === 'undefined';
+                    const staffName = String(r?.Staff || r?.staff || r?.staff_name || '');
+                    const isToday = (rowDateYMD(r) || '') === todayYMDManila;
+                    return (
+                      <tr key={(ymd || '') + '|' + (String(r?.Staff || r?.staff || i))}>
+                        <td>{fmtDate(ymd)}</td>
+                        <td style={{ fontWeight: 700 }}>
+                          {staffName}{noOut && isToday && <span style={{ marginLeft: 8 }} className="status-badge on">On</span>}
+                        </td>
+                        <td>{tinDisp}</td>
+                        <td>{toutDisp}</td>
+                        <td style={{ textAlign: 'center' }}>{hours}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {attendancePager.canLoadMore && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8, paddingRight: 8 }}>
+                <button className="load-more-link" type="button" onClick={attendancePager.loadMore}>
+                  Load 20 more
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
 
       {/* Coaching Sessions Panel */}
       <div className="panel" style={{ marginTop: 18 }}>
-        <div className="panel-header">Coaching Sessions</div>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', padding: '8px 0 6px 0' }}>
-          <div>
-            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Coach</div>
-            <select value={selectedCoach} onChange={e => setSelectedCoach(e.target.value)} style={{ width: 260, height: 44, padding: '8px 12px', border: '1px solid #e7e8ef', borderRadius: 10, fontSize: 16 }}>
-              {coachOptions.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>
-          <div>
-            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Period</div>
-            <select value={selectedPeriodIndex} onChange={e => setSelectedPeriodIndex(Number(e.target.value))} style={{ width: 260, height: 44, padding: '8px 12px', border: '1px solid #e7e8ef', borderRadius: 10, fontSize: 16 }}>
-              {periods.map((p, i) => <option key={p.label} value={i}>{p.label}</option>)}
-            </select>
-          </div>
-        </div>
-        <div style={{ paddingTop: 6, paddingBottom: 12, fontWeight: 700, paddingLeft: 8 }}>Sessions: {coachingSessions?.length || 0}</div>
-        <div style={{ overflowX: 'auto', padding: 8 }}>
-          <table className="attendance-table aligned" style={{ width: '100%' }}>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Nickname</th>
-                <th>Time In</th>
-                <th>Time Out</th>
-                <th style={{ textAlign: 'center' }}>Total Hours</th>
-                <th>Focus</th>
-              </tr>
-            </thead>
-            <tbody>
-              {!periods || periods.length === 0 ? (
-                <tr><td colSpan={6}>No periods</td></tr>
-              ) : coachingPager.visible.length === 0 ? (
-                <tr><td colSpan={6}>No sessions for selected coach / period.</td></tr>
-              ) : (
-                coachingPager.visible.map((r, i) => {
-                  const ymd = rowDateYMD(r) || '';
-                  const tin = displayTime(r);
-                  const toutIso = r?.time_out || r?.TimeOut || r?.timeOut || '';
-                  const tout = toutIso ? (toutIso.length === 5 ? displayTime({ TimeIn: toutIso }) : fmtTime(toutIso)) : '—';
-                  const hours = (typeof r?.TotalHours !== 'undefined' && r?.TotalHours !== null) ? String(r?.TotalHours)
-                    : (typeof r?.NoOfHours !== 'undefined' && r?.NoOfHours !== null) ? String(r?.NoOfHours)
-                    : (typeof r?.TotalHours !== 'undefined' && r?.TotalHours !== null) ? String(r?.TotalHours)
-                    : (typeof r?.hours !== 'undefined' && r?.hours !== null) ? String(r?.hours)
-                    : '—';
-                  // Resolve nickname by looking up members collection (same as Dashboard)
-                  const pid = String(r?.MemberID || r?.memberid || r?.member || r?.Member || r?.id || '').trim();
-                  const member = (members || []).find(m => String(m?.MemberID || m?.memberid || m?.id || '').trim() === pid) || null;
-                  const nick = member ? displayName(member) : (String(r?.NickName || r?.nickname || r?.Member || r?.member || '') || '');
-                  return (
-                    <tr key={(ymd || '') + '|' + nick + '|' + i} style={{ cursor: 'pointer' }} onClick={() => setSelectedVisit(r)}>
-                      <td>{fmtDate(ymd)}</td>
-                      <td style={{ fontWeight: 700 }}>{nick}</td>
-                      <td>{tin}</td>
-                      <td>{tout}</td>
-                      <td style={{ textAlign: 'center' }}>{hours}</td>
-                      <td>{String(r?.Focus || r?.focus || '')}</td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-        {coachingPager.canLoadMore && (
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8, paddingRight: 8 }}>
-            <button className="load-more-link" type="button" onClick={coachingPager.loadMore}>
-              Load 20 more
+        <div className="panel-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <span>Coaching Sessions</span>
+          <div style={{ display: 'inline-flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button className="button" type="button" onClick={() => setCoachCollapsed(v => !v)} style={{ background: '#eee', color: '#333' }}>
+              {coachCollapsed ? 'Expand' : 'Collapse'}
             </button>
+            <select value={selectedCoach} onChange={(e) => setSelectedCoach(e.target.value)} style={{ height: 44, padding: '8px 12px', border: '1px solid #e7e8ef', borderRadius: 10, fontSize: 16, minWidth: 220 }}>
+              {coachOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <select value={coachPeriodIndex} onChange={(e) => setCoachPeriodIndex(Number(e.target.value))} style={{ height: 44, padding: '8px 12px', border: '1px solid #e7e8ef', borderRadius: 10, fontSize: 16, minWidth: 220 }}>
+              {(periods || []).map((p, i) => <option key={p.label} value={i}>{p.label}</option>)}
+            </select>
           </div>
+        </div>
+
+        {!coachCollapsed && (
+          <>
+            <div style={{ paddingTop: 6, paddingBottom: 12, fontWeight: 700, paddingLeft: 8 }}>Sessions: {coachingSessions?.length || 0}</div>
+            <div style={{ overflowX: 'auto', padding: 8 }}>
+              <table className="attendance-table aligned" style={{ width: '100%' }}>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Nickname</th>
+                    <th>Time In</th>
+                    <th>Time Out</th>
+                    <th style={{ textAlign: 'center' }}>Total Hours</th>
+                    <th>Focus</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {!periods || periods.length === 0 ? (
+                    <tr><td colSpan={6}>No periods</td></tr>
+                  ) : coachingPager.visible.length === 0 ? (
+                    <tr><td colSpan={6}>No sessions for selected coach / period.</td></tr>
+                  ) : (
+                    coachingPager.visible.map((r, i) => {
+                      const ymd = rowDateYMD(r) || '';
+                      const tin = displayTime(r);
+                      const toutIso = r?.time_out || r?.TimeOut || r?.timeOut || '';
+                      const tout = toutIso ? (toutIso.length === 5 ? displayTime({ TimeIn: toutIso }) : fmtTime(toutIso)) : '—';
+                      const hours = (typeof r?.TotalHours !== 'undefined' && r?.TotalHours !== null) ? String(r?.TotalHours)
+                        : (typeof r?.NoOfHours !== 'undefined' && r?.NoOfHours !== null) ? String(r?.NoOfHours)
+                        : (typeof r?.TotalHours !== 'undefined' && r?.TotalHours !== null) ? String(r?.TotalHours)
+                        : (typeof r?.hours !== 'undefined' && r?.hours !== null) ? String(r?.hours)
+                        : '—';
+                      // Resolve nickname by looking up members collection (same as Dashboard)
+                      const pid = String(r?.MemberID || r?.memberid || r?.member || r?.Member || r?.id || '').trim();
+                      const member = (members || []).find(m => String(m?.MemberID || m?.memberid || m?.id || '').trim() === pid) || null;
+                      const nick = member ? displayName(member) : (String(r?.NickName || r?.nickname || r?.Member || r?.member || '') || '');
+                      return (
+                        <tr key={(ymd || '') + '|' + nick + '|' + i} style={{ cursor: 'pointer' }} onClick={() => setSelectedVisit(r)}>
+                          <td>{fmtDate(ymd)}</td>
+                          <td style={{ fontWeight: 700 }}>{nick}</td>
+                          <td>{tin}</td>
+                          <td>{tout}</td>
+                          <td style={{ textAlign: 'center' }}>{hours}</td>
+                          <td>{String(r?.Focus || r?.focus || '')}</td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+            {coachingPager.canLoadMore && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8, paddingRight: 8 }}>
+                <button className="load-more-link" type="button" onClick={coachingPager.loadMore}>
+                  Load 20 more
+                </button>
+              </div>
+            )}
+          </>
         )}
         {/* Visit detail modal for coaching session rows */}
         <VisitViewModal open={!!selectedVisit} onClose={() => setSelectedVisit(null)} row={selectedVisit} onCheckout={async (entry) => { try { await load(); } catch(e){} setSelectedVisit(null); }} />
