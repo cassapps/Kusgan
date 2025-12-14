@@ -114,6 +114,21 @@ export default function PaymentModal({ open, onClose, memberId, onSaved, members
   const [error, setError] = useState("");
   const [nowTick, setNowTick] = useState(0);
 
+  // Pricing visibility rules rely on member fields (Discount/Age/Birthday). This modal historically
+  // only receives a few booleans, so build a minimal member-like object for gating.
+  const memberForVisibility = useMemo(() => {
+    const discount = isSpecial ? 'Special' : (isStudent ? 'Student' : '');
+    return {
+      Discount: discount,
+      discount,
+      // Support senior detection via Birthday field.
+      Birthday: birthDate || '',
+      birthday: birthDate || '',
+      // Legacy fallback some helpers may read.
+      Student: isStudent ? 'Yes' : '',
+    };
+  }, [isSpecial, isStudent, birthDate]);
+
   // Refresh time-window logic while the modal is open.
   useEffect(() => {
     if (!open) return;
@@ -261,7 +276,7 @@ export default function PaymentModal({ open, onClose, memberId, onSaved, members
     });
 
     return (ALLOWED_PARTICULARS || [])
-      .filter((name) => isParticularsVisibleForMember(name, member))
+      .filter((name) => isParticularsVisibleForMember(name, memberForVisibility))
       .map((name) => {
       const defaults = getParticularsDefaults(name);
       const fromDb = pricingByName.get(normalize(name));
@@ -283,7 +298,7 @@ export default function PaymentModal({ open, onClose, memberId, onSaved, members
         "Coach subscription": baseFlags.coach ? 'Yes' : 'No',
       };
     });
-  }, [pricing, member]);
+  }, [pricing, memberForVisibility]);
 
   // Clear selection if it disappears (shouldn't happen with the allowlist, but keep it safe)
   useEffect(() => {
