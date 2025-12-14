@@ -27,7 +27,7 @@ export default function TopBar({ collapsed = false, onToggleSidebar, onLogout, r
     return () => clearInterval(id);
   }, []);
 
-  const logoSrc = `${import.meta.env.BASE_URL}kusgan-logo.png`;
+  const logoSrc = `${import.meta.env.BASE_URL}favicon.png`;
 
   return (
     <header className="topbar">

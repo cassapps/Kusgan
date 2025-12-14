@@ -182,45 +182,45 @@ body{
   align-items: center;
   gap: 12px;
   padding: 0 16px;
-  background: #000;
-  color: #fff;
+  background: var(--light-surface);
+  color: var(--text);
   border-bottom: none;
-  box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.08);
   z-index: 1000;
 }
 .topbar-left{ display:flex; align-items:center; gap: 10px; min-width: 0; }
-.topbar-center{ font-weight: 900; color: #fff; text-align: center; white-space: nowrap; }
+.topbar-center{ font-weight: 900; color: var(--text); text-align: center; white-space: nowrap; }
 .topbar-right{ display:flex; align-items:center; justify-content: flex-end; gap: 10px; }
-.topbar-title{ font-weight: 900; letter-spacing: 0.4px; color: #fff; white-space: nowrap; }
+.topbar-title{ font-weight: 900; letter-spacing: 0.4px; color: var(--text); white-space: nowrap; }
 .topbar-logo{ width: 28px; height: 28px; object-fit: contain; }
-.topbar-role{ font-weight: 900; color: #fff; white-space: nowrap; }
+.topbar-role{ font-weight: 900; color: var(--text); white-space: nowrap; }
 .topbar-icon-btn{
   height: 34px;
   width: 38px;
-  border: 1px solid rgba(255,255,255,0.28);
+  border: 1px solid rgba(0,0,0,0.15);
   border-radius: 10px;
   background: transparent;
-  color: #fff;
+  color: var(--text);
   font-size: 18px;
   font-weight: 900;
   cursor: pointer;
 }
-.topbar-icon-btn:hover{ background: rgba(255,255,255,0.08); }
+.topbar-icon-btn:hover{ background: rgba(0,0,0,0.06); }
 .topbar-icon-btn:focus{ outline: none; box-shadow: var(--btn-ring); }
 
 .topbar-logout-icon{
   height: 34px;
   width: 38px;
-  border: 1px solid rgba(255,255,255,0.28);
+  border: 1px solid rgba(0,0,0,0.15);
   border-radius: 10px;
   background: transparent;
-  color: #fff;
+  color: var(--text);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
 }
-.topbar-logout-icon:hover{ background: rgba(255,255,255,0.08); }
+.topbar-logout-icon:hover{ background: rgba(0,0,0,0.06); }
 .topbar-logout-icon:focus{ outline: none; box-shadow: var(--btn-ring); }
 .topbar-logout-icon svg{ width: 18px; height: 18px; fill: currentColor; }
 
@@ -296,7 +296,7 @@ body{
   bottom: 0;
   width: var(--sidebar-width);
   background: var(--light-bg);
-  border-right: 3px solid var(--kusgan-magenta);
+  border-right: 1px solid var(--sidebar-border);
   color: #111;
   padding:16px 12px;
   overflow-y:auto;
