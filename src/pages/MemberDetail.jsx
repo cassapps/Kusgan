@@ -94,6 +94,13 @@ const fmtDateTime = (d) => {
 };
 const display = (v) => (v === undefined || v === null || String(v).trim() === "" ? "-" : String(v));
 
+const fmtPesoWhole = (value) => {
+  if (value === undefined || value === null || String(value).trim() === "") return "-";
+  const n = Number(String(value).replace(/,/g, ""));
+  if (!Number.isFinite(n)) return String(value);
+  return new Intl.NumberFormat("en-PH", { maximumFractionDigits: 0 }).format(Math.round(n));
+};
+
 // normalize Drive viewer links to direct-view URLs; leave googleusercontent links as-is
 const driveImg = (u) => {
   const s = String(u || "");
@@ -891,7 +898,7 @@ export default function MemberDetail() {
                 <td>{fmtDate(gymUntil)}</td>
                 <td>{fmtDate(coachUntil)}</td>
                 <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>{display(mode)}</td>
-                <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{display(cost)}</td>
+                <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{fmtPesoWhole(cost)}</td>
               </tr>
             );
           })}
