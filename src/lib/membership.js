@@ -105,14 +105,12 @@ export function computeStatusForMember(paymentsArray, memberOrId, pricingRows = 
     }
   }
 
-  // If payments don't provide membershipEnd, attempt to read member-level fields from memberOrId when it's an object
+  // If payments don't provide membershipEnd, attempt to read member-level fields from memberOrId when it's an object.
+  // Important: do NOT early-return just because the member state says "active"; explicit end-date fields should win.
+  let memberStateRaw = null;
   if ((!membershipEnd || membershipEnd == null) && memberOrId && typeof memberOrId === 'object') {
     const m = normRow(memberOrId);
-    const memberStateRaw = String(firstOf(m, ['membershipstate','membership_state','membership','status']) || '').trim().toLowerCase();
-    if (memberStateRaw === 'active') {
-      // mark active without changing membershipEnd
-      return { membershipEnd: membershipEnd, membershipState: 'active', coachEnd: coachEnd, coachActive: !!(coachEndYMD && coachEndYMD >= today) };
-    }
+    memberStateRaw = String(firstOf(m, ['membershipstate','membership_state','membership','status']) || '').trim().toLowerCase() || null;
     const memberGymUntil = firstOf(m, ['membershipend','membership_end','membershipEnd','membership_end','gymvaliduntil','gym_valid_until','gym_until','enddate','end_date','valid_until','expiry','expires','until','end','gym_valid','gym_validity','gymvalid']);
     if (memberGymUntil) {
       const g = asDate(memberGymUntil);
@@ -126,6 +124,8 @@ export function computeStatusForMember(paymentsArray, memberOrId, pricingRows = 
   let membershipState = null;
   if (membershipEndYMD) {
     membershipState = membershipEndYMD >= today ? 'active' : 'expired';
+  } else if (memberStateRaw === 'active') {
+    membershipState = 'active';
   }
   let coachActive = false;
   if (coachEndYMD) {

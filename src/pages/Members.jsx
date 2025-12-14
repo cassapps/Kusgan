@@ -319,7 +319,28 @@ export default function Members() {
   useEffect(() => {
     let cancelled = false;
     async function doSearch() {
-      if (!debouncedQ) return;
+      if (!debouncedQ) {
+        // Search cleared: restore the full members dataset so default view shows active members again.
+        try {
+          if (data?.members) {
+            const members = (data.members || []).map(normRow);
+            setRows(members);
+            setPricingRows(data.pricing || []);
+            if (useFirestore) {
+              const pays = data.payments || [];
+              paymentsRef.current = pays;
+              setPayIdx(buildStatusIndex({ membersRaw: members, paymentsRaw: pays || [], pricingRows: data.pricing || [] }));
+            } else {
+              paymentsRef.current = data.payments || [];
+              setPayIdx(buildStatusIndex({ membersRaw: members, paymentsRaw: data.payments || [], pricingRows: data.pricing || [] }));
+            }
+            setVisitIdx(buildLastVisitIndex(data.gymEntries || []));
+          }
+        } catch {
+          // ignore
+        }
+        return;
+      }
       setLoading(true);
       try {
         const mRes = await api.searchMembersByName(debouncedQ);
@@ -343,9 +364,9 @@ export default function Members() {
         if (!cancelled) setLoading(false);
       }
     }
-    if (debouncedQ) doSearch();
+    doSearch();
     return () => { cancelled = true; };
-  }, [debouncedQ, useFirestore, pricingRows]);
+  }, [debouncedQ, data, useFirestore, pricingRows]);
 
   // mirror SWR loading/error into local state for existing UI
   useEffect(() => {
@@ -363,6 +384,13 @@ export default function Members() {
 
   const filteredSorted = useMemo(() => {
     const term = debouncedQ.trim().toLowerCase();
+
+    const manilaYMD = (d) => {
+      const dt = asDate(d);
+      if (!dt) return null;
+      return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(dt);
+    };
+    const todayYMD = manilaYMD(new Date());
 
     const today = new Date();
     const withVisit = (rows || []).map((r) => {
@@ -411,8 +439,10 @@ export default function Members() {
         : null;
       const gymUntil = pay?.membershipEnd || memberGymUntil || latestGymUntil || null;
       const coachUntil = pay?.coachEnd || memberCoachUntil || latestCoachUntil || null;
-      const gymActive = pay?.membershipState === 'active';
-      const coachActive = !!pay?.coachActive;
+      const gymY = manilaYMD(gymUntil);
+      const coachY = manilaYMD(coachUntil);
+      const gymActive = gymY ? (todayYMD ? gymY >= todayYMD : false) : (pay?.membershipState === 'active');
+      const coachActive = coachY ? (todayYMD ? coachY >= todayYMD : false) : (!!pay?.coachActive);
       const isActive = gymActive || coachActive;
 
       const first = String(firstOf(r, ["first_name", "firstname", "first", "given_name"]) ?? "");
@@ -562,14 +592,16 @@ export default function Members() {
                   <tbody>
                     {membersPager.visible.map(({ r, lastVisit, isToday, memberId, gymUntil, coachUntil }, i) => {
                       const pay = memberId ? payIdx.get(memberId) : undefined;
-                      const today0 = new Date();
-                      today0.setHours(0, 0, 0, 0);
-                      const gymActive = pay
-                        ? (pay?.membershipState === 'active')
-                        : (gymUntil ? ((asDate(gymUntil)?.getTime() || 0) >= today0.getTime()) : false);
-                      const coachActive = pay
-                        ? !!pay?.coachActive
-                        : (coachUntil ? ((asDate(coachUntil)?.getTime() || 0) >= today0.getTime()) : false);
+                      const manilaYMD = (d) => {
+                        const dt = asDate(d);
+                        if (!dt) return null;
+                        return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(dt);
+                      };
+                      const todayYMD = manilaYMD(new Date());
+                      const gymY = manilaYMD(gymUntil);
+                      const coachY = manilaYMD(coachUntil);
+                      const gymActive = gymY ? (todayYMD ? gymY >= todayYMD : false) : (pay?.membershipState === 'active');
+                      const coachActive = coachY ? (todayYMD ? coachY >= todayYMD : false) : (!!pay?.coachActive);
                       const first = String(firstOf(r, ["first_name","firstname","first","given_name"]) ?? "");
                       const last = String(firstOf(r, ["last_name","lastname","last","surname"]) ?? "");
                       const fullName = [first, last].filter(Boolean).map(toTitleCase).join(" ");
@@ -630,14 +662,16 @@ export default function Members() {
                 {({ index, style }) => {
                   const { r, lastVisit, isToday, memberId, gymUntil, coachUntil } = membersPager.visible[index];
                   const pay = memberId ? payIdx.get(memberId) : undefined;
-                  const today0 = new Date();
-                  today0.setHours(0, 0, 0, 0);
-                  const gymActive = pay
-                    ? (pay?.membershipState === 'active')
-                    : (gymUntil ? ((asDate(gymUntil)?.getTime() || 0) >= today0.getTime()) : false);
-                  const coachActive = pay
-                    ? !!pay?.coachActive
-                    : (coachUntil ? ((asDate(coachUntil)?.getTime() || 0) >= today0.getTime()) : false);
+                  const manilaYMD = (d) => {
+                    const dt = asDate(d);
+                    if (!dt) return null;
+                    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(dt);
+                  };
+                  const todayYMD = manilaYMD(new Date());
+                  const gymY = manilaYMD(gymUntil);
+                  const coachY = manilaYMD(coachUntil);
+                  const gymActive = gymY ? (todayYMD ? gymY >= todayYMD : false) : (pay?.membershipState === 'active');
+                  const coachActive = coachY ? (todayYMD ? coachY >= todayYMD : false) : (!!pay?.coachActive);
                   const first = String(firstOf(r, ["first_name","firstname","first","given_name"]) ?? "");
                   const last = String(firstOf(r, ["last_name","lastname","last","surname"]) ?? "");
                   const fullName = [first, last].filter(Boolean).map(toTitleCase).join(" ");
