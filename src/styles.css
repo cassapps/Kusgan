@@ -129,7 +129,7 @@
   --sidebar-muted:#b6b8c2;
 
   /* Layout */
-  --topbar-height: 64px;
+  --topbar-height: 52px;
   --sidebar-width: 260px;
   --sidebar-width-collapsed: 72px;
 
@@ -182,29 +182,47 @@ body{
   align-items: center;
   gap: 12px;
   padding: 0 16px;
-  background: var(--light-bg);
-  border-bottom: 3px solid var(--kusgan-magenta);
-  box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+  background: #000;
+  color: #fff;
+  border-bottom: none;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.25);
   z-index: 1000;
 }
 .topbar-left{ display:flex; align-items:center; gap: 10px; min-width: 0; }
-.topbar-center{ font-weight: 800; color: #111; text-align: center; white-space: nowrap; }
+.topbar-center{ font-weight: 900; color: #fff; text-align: center; white-space: nowrap; }
 .topbar-right{ display:flex; align-items:center; justify-content: flex-end; gap: 10px; }
-.topbar-title{ font-weight: 900; letter-spacing: 0.4px; color: #111; white-space: nowrap; }
-.topbar-logo{ width: 34px; height: 34px; object-fit: contain; }
-.topbar-role{ font-weight: 800; color: #111; white-space: nowrap; }
+.topbar-title{ font-weight: 900; letter-spacing: 0.4px; color: #fff; white-space: nowrap; }
+.topbar-logo{ width: 28px; height: 28px; object-fit: contain; }
+.topbar-role{ font-weight: 900; color: #fff; white-space: nowrap; }
 .topbar-icon-btn{
-  height: 40px;
-  width: 44px;
-  border: 1px solid rgba(0,0,0,0.15);
+  height: 34px;
+  width: 38px;
+  border: 1px solid rgba(255,255,255,0.28);
   border-radius: 10px;
-  background: rgba(255,255,255,0.7);
+  background: transparent;
+  color: #fff;
   font-size: 18px;
   font-weight: 900;
   cursor: pointer;
 }
+.topbar-icon-btn:hover{ background: rgba(255,255,255,0.08); }
 .topbar-icon-btn:focus{ outline: none; box-shadow: var(--btn-ring); }
-.topbar-logout{ height: 40px; padding: 0 16px; font-weight: 900; }
+
+.topbar-logout-icon{
+  height: 34px;
+  width: 38px;
+  border: 1px solid rgba(255,255,255,0.28);
+  border-radius: 10px;
+  background: transparent;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.topbar-logout-icon:hover{ background: rgba(255,255,255,0.08); }
+.topbar-logout-icon:focus{ outline: none; box-shadow: var(--btn-ring); }
+.topbar-logout-icon svg{ width: 18px; height: 18px; fill: currentColor; }
 
 /* Panel: reusable white card used across dashboard and pages */
 .panel{
@@ -277,9 +295,9 @@ body{
   left: 0;
   bottom: 0;
   width: var(--sidebar-width);
-  background:var(--sidebar-bg);
-  border-right:1px solid var(--sidebar-border);
-  color:var(--sidebar-text);
+  background: var(--light-bg);
+  border-right: 3px solid var(--kusgan-magenta);
+  color: #111;
   padding:16px 12px;
   overflow-y:auto;
   display: flex;
@@ -332,11 +350,11 @@ body{
 .nav a{
   display:flex; align-items:center; gap:10px;
   padding:10px 12px; margin:4px 0; border-radius:10px;
-  color:var(--sidebar-text); text-decoration:none;
+  color:#111; text-decoration:none;
   transition:background .15s ease,color .15s ease;
 }
-.nav a:hover{ background:#14141a; }
-.nav a.active{ background:var(--kusgan-magenta-100); color:#54082f; font-weight:700; }
+.nav a:hover{ background: rgba(0,0,0,0.06); }
+.nav a.active{ background:var(--kusgan-magenta-100); color:#111; font-weight:900; }
 
 /* ---------- Content wrappers ---------- */
 .content{ padding:18px; }

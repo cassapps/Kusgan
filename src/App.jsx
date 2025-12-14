@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import Login from "./pages/Login";
 import apiClient from './lib/apiClient';
-import { getAuth, onAuthStateChanged, signOut } from 'firebase/auth';
+import { getAuth, getIdTokenResult, onAuthStateChanged, signOut } from 'firebase/auth';
 import { ensureFirebase } from './lib/firebase';
+import { isAdminUid } from './lib/admin';
 
 import Nav from "./components/Nav";
 import TopBar from './components/TopBar.jsx';
@@ -43,9 +44,29 @@ export default function App() {
     let mounted = true;
     (async () => {
       try {
-        // Only attempt role lookup when logged in (or a token exists).
-        const hasAnyAuth = Boolean(apiClient.getToken()) || Boolean(fbUser);
-        if (!hasAnyAuth) return setIsAdmin(false);
+        // Firestore mode: admin is currently defined by a client-side UID allowlist.
+        // Prefer Firebase custom claims when available; fallback to UI-only UID allowlist.
+        if (useFirestore) {
+          if (!fbUser) return setIsAdmin(false);
+          try {
+            const tokenRes = await getIdTokenResult(fbUser);
+            if (!mounted) return;
+            const claims = tokenRes?.claims || {};
+            const claimRole = String(claims.role || '').toLowerCase();
+            const claimAdmin = Boolean(claims.admin);
+            if (claimRole) return setIsAdmin(claimRole === 'admin');
+            if (claimAdmin) return setIsAdmin(true);
+          } catch {
+            // ignore and fall back
+          }
+
+          if (!mounted) return;
+          return setIsAdmin(isAdminUid(fbUser.uid));
+        }
+
+        // Legacy (server-token) mode: rely on /auth/me role.
+        const hasToken = Boolean(apiClient.getToken());
+        if (!hasToken) return setIsAdmin(false);
         const res = await apiClient.fetchWithAuth('/auth/me');
         if (!mounted) return;
         if (!res?.ok) return setIsAdmin(false);

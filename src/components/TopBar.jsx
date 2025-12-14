@@ -48,8 +48,10 @@ export default function TopBar({ collapsed = false, onToggleSidebar, onLogout, r
 
       <div className="topbar-right">
         {!!roleLabel && <div className="topbar-role">{roleLabel}</div>}
-        <button type="button" className="button topbar-logout" onClick={() => onLogout?.()}>
-          Logout
+        <button type="button" className="topbar-logout-icon" aria-label="Logout" onClick={() => onLogout?.()}>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M10 17a1 1 0 0 1 0-2h6V9h-6a1 1 0 0 1 0-2h7a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-7Zm-1.707-3.293a1 1 0 0 1 0-1.414L9.586 11H4a1 1 0 1 1 0-2h5.586L8.293 7.707a1 1 0 1 1 1.414-1.414l3 3a1 1 0 0 1 0 1.414l-3 3a1 1 0 0 1-1.414 0Z" />
+          </svg>
         </button>
       </div>
     </header>
