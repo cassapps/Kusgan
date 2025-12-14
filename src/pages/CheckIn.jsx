@@ -25,10 +25,13 @@ const isDateActive = (d) => {
   if (!d) return false;
   const dt = d instanceof Date ? new Date(d) : new Date(d);
   if (isNaN(dt)) return false;
-  const today = new Date();
-  today.setHours(0,0,0,0);
-  dt.setHours(0,0,0,0);
-  return dt >= today;
+  try {
+    const todayYMD = new Intl.DateTimeFormat('en-CA', { timeZone: MANILA_TZ, year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date());
+    const dtYMD = new Intl.DateTimeFormat('en-CA', { timeZone: MANILA_TZ, year:'numeric', month:'2-digit', day:'2-digit' }).format(dt);
+    return dtYMD >= todayYMD;
+  } catch {
+    return false;
+  }
 };
 
 // membership detection uses shared helper in src/lib/membership

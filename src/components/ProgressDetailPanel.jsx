@@ -7,17 +7,32 @@ function fmtDate(iso) {
   if (!iso) return "—";
   const d = new Date(iso);
   if (isNaN(d)) return "—";
-  const month = d.toLocaleString(undefined, { month: "short" });
-  const day = d.getDate();
-  const year = d.getFullYear();
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Manila', month: 'short', day: 'numeric', year: 'numeric' }).formatToParts(d);
+  const month = parts.find(p => p.type === 'month')?.value || '';
+  const day = parts.find(p => p.type === 'day')?.value || '';
+  const year = parts.find(p => p.type === 'year')?.value || '';
   return `${month}-${day}, ${year}`;
 }
 function daysSince(startIso, dateIso) {
   if (!startIso || !dateIso) return null;
-  const start = new Date(startIso);
-  const date = new Date(dateIso);
-  const ms = date.setHours(0,0,0,0) - start.setHours(0,0,0,0);
-  return Math.floor(ms / 86400000) + 1;
+  try {
+    const toManilaMidnightMs = (v) => {
+      const raw = String(v || '').trim();
+      if (!raw) return NaN;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return new Date(`${raw}T00:00:00+08:00`).getTime();
+      const d = new Date(raw);
+      if (isNaN(d)) return NaN;
+      const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year:'numeric', month:'2-digit', day:'2-digit' }).format(d);
+      return new Date(`${ymd}T00:00:00+08:00`).getTime();
+    };
+    const startMs = toManilaMidnightMs(startIso);
+    const dateMs = toManilaMidnightMs(dateIso);
+    if (!isFinite(startMs) || !isFinite(dateMs)) return null;
+    const ms = dateMs - startMs;
+    return Math.floor(ms / 86400000) + 1;
+  } catch {
+    return null;
+  }
 }
 
 export default function ProgressDetailPanel({ memberId, entryIndex }) {

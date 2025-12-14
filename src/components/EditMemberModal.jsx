@@ -155,7 +155,18 @@ export default function EditMemberModal({ open, onClose, member, onSaved }) {
               middleName: String(mn || ""),
               nickName: String(nn || ""),
               gender: String(gen || ""),
-              birthday: bday ? new Date(bday).toISOString().slice(0, 10) : "",
+              birthday: (() => {
+                try {
+                  const raw = String(bday || '').trim();
+                  if (!raw) return '';
+                  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+                  const d = new Date(raw);
+                  if (!d || isNaN(d)) return '';
+                  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year:'numeric', month:'2-digit', day:'2-digit' }).format(d);
+                } catch {
+                  return '';
+                }
+              })(),
               street: String(street || ""),
               brgy: candidateBrgy,
               municipality: String(muni || ""),
@@ -207,7 +218,18 @@ export default function EditMemberModal({ open, onClose, member, onSaved }) {
           middleName: String(mn || ""),
           nickName: String(nn || ""),
           gender: String(gen || ""),
-          birthday: bday ? new Date(bday).toISOString().slice(0, 10) : "",
+          birthday: (() => {
+            try {
+              const raw = String(bday || '').trim();
+              if (!raw) return '';
+              if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+              const d = new Date(raw);
+              if (!d || isNaN(d)) return '';
+              return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year:'numeric', month:'2-digit', day:'2-digit' }).format(d);
+            } catch {
+              return '';
+            }
+          })(),
           street: String(street || ""),
           brgy: candidateBrgy,
           municipality: String(muni || ""),

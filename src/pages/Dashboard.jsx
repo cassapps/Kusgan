@@ -895,7 +895,17 @@ export default function Dashboard() {
             const pid = String(r?.MemberID || r?.member_id || r?.id || r?.member || "").trim();
             if (!pid || pid !== memberId) return false;
             const dateRaw = r.Date || r.date || r.Timestamp || r.timestamp || '';
-            const ymd = dateRaw ? new Date(dateRaw).toLocaleDateString('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }) : '';
+            const ymd = (() => {
+              try {
+                if (!dateRaw) return '';
+                const raw = String(dateRaw);
+                const d = (/^\d{4}-\d{2}-\d{2}$/.test(raw.trim())) ? new Date(`${raw.trim()}T00:00:00+08:00`) : new Date(raw);
+                if (!d || isNaN(d)) return '';
+                return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+              } catch {
+                return '';
+              }
+            })();
             if (ymd !== today) return false;
             const tout = String(r?.TimeOut || r?.timeout || r?.time_out || '').trim();
             return !!tout && tout !== '-' && tout !== '—';

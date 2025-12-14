@@ -78,7 +78,7 @@ export default function StaffPanel() {
             <tr key={s.id}>
               <td>{s.full_name}</td>
               <td><span className="badge info">{s.role}</span></td>
-              <td>{new Date(s.created_at || s.createdAt || Date.now()).toLocaleString()}</td>
+              <td>{new Intl.DateTimeFormat('en-PH', { timeZone: 'Asia/Manila', year: 'numeric', month: 'short', day: '2-digit', hour: 'numeric', minute: '2-digit' }).format(new Date(s.created_at || s.createdAt || Date.now()))}</td>
             </tr>
           ))}
           {list.length === 0 && (

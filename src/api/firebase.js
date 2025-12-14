@@ -65,14 +65,10 @@ function manilaStartOfDay(ymd) {
 
 function ymdNext(ymd) {
   try {
-    const [yy, mm, dd] = String(ymd || '').split('-').map((n) => Number(n));
-    if (!yy || !mm || !dd) return '';
-    const d = new Date(yy, (mm - 1), dd);
-    d.setDate(d.getDate() + 1);
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
+    const start = manilaStartOfDay(ymd);
+    if (!start) return '';
+    const next = new Date(start.getTime() + (24 * 60 * 60 * 1000));
+    return manilaYMD(next);
   } catch (e) {
     return '';
   }
@@ -82,11 +78,10 @@ function ymdMonthNext(monthKey) {
   try {
     const [yy, mm] = String(monthKey || '').split('-').map((n) => Number(n));
     if (!yy || !mm) return '';
-    const d = new Date(yy, (mm - 1), 1);
-    d.setMonth(d.getMonth() + 1);
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    return `${y}-${m}`;
+    let y = yy;
+    let m = mm + 1;
+    if (m === 13) { y = y + 1; m = 1; }
+    return `${y}-${String(m).padStart(2, '0')}`;
   } catch (e) {
     return '';
   }
@@ -94,10 +89,11 @@ function ymdMonthNext(monthKey) {
 
 function ymdToLocalDayRange(ymd) {
   try {
-    const [yy, mm, dd] = String(ymd || '').split('-').map((n) => Number(n));
-    if (!yy || !mm || !dd) return { start: null, end: null };
-    const start = new Date(yy, (mm - 1), dd, 0, 0, 0, 0);
-    const end = new Date(yy, (mm - 1), dd + 1, 0, 0, 0, 0);
+    const s = String(ymd || '').trim();
+    if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(s)) return { start: null, end: null };
+    const start = manilaStartOfDay(s);
+    const next = ymdNext(s);
+    const end = next ? manilaStartOfDay(next) : null;
     return { start, end };
   } catch (e) {
     return { start: null, end: null };
@@ -108,11 +104,31 @@ function monthKeyToLocalRange(monthKey) {
   try {
     const [yy, mm] = String(monthKey || '').split('-').map((n) => Number(n));
     if (!yy || !mm) return { start: null, end: null };
-    const start = new Date(yy, (mm - 1), 1, 0, 0, 0, 0);
-    const end = new Date(yy, (mm - 1) + 1, 1, 0, 0, 0, 0);
+    const mk = `${String(yy).padStart(4, '0')}-${String(mm).padStart(2, '0')}`;
+    const start = manilaStartOfDay(`${mk}-01`);
+    const nextMk = ymdMonthNext(mk);
+    const end = nextMk ? manilaStartOfDay(`${nextMk}-01`) : null;
     return { start, end };
   } catch (e) {
     return { start: null, end: null };
+  }
+}
+
+function dateLikeToDate(v) {
+  try {
+    if (!v) return null;
+    if (v instanceof Date) return isNaN(v) ? null : v;
+    if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v.trim())) return manilaStartOfDay(v.trim());
+    if (v && typeof v.toDate === 'function') {
+      const d = v.toDate();
+      return (d instanceof Date && !isNaN(d)) ? d : null;
+    }
+    if (v && typeof v.seconds === 'number') return new Date(v.seconds * 1000);
+    if (v && typeof v._seconds === 'number') return new Date(v._seconds * 1000);
+    const d = new Date(v);
+    return isNaN(d) ? null : d;
+  } catch {
+    return null;
   }
 }
 
@@ -290,8 +306,10 @@ export async function addGymEntry(row) { const r = await fb.addDocument(COLS.gym
 
 // Date-scoped helpers to avoid reading entire collections.
 export async function fetchGymEntriesSince({ days = 30, limit = 2000 } = {}) {
-  const cutoff = new Date(Date.now() - (days * 24 * 60 * 60 * 1000));
-  const cutoffYMD = cutoff.toISOString().slice(0, 10);
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - (days * 24 * 60 * 60 * 1000));
+  const cutoffYMD = manilaYMD(cutoff);
+  const cutoffStart = cutoffYMD ? manilaStartOfDay(cutoffYMD) : cutoff;
   try {
     // String Date range works for both YYYY-MM-DD and ISO strings that start with YYYY-MM-DD.
     const rows = await fb.queryCollection(COLS.gymEntries, {
@@ -301,7 +319,7 @@ export async function fetchGymEntriesSince({ days = 30, limit = 2000 } = {}) {
     if (rows && rows.length) return { rows };
     // Fallback: if Date is stored as a Firestore Timestamp.
     const rowsTs = await fb.queryCollection(COLS.gymEntries, {
-      wheres: [{ field: 'Date', op: '>=', value: cutoff }],
+      wheres: [{ field: 'Date', op: '>=', value: cutoffStart || cutoff }],
       limit,
     });
     return { rows: rowsTs || [] };
@@ -352,7 +370,7 @@ export async function fetchGymEntriesForDate(dateYMD) {
 export async function gymQuickAppend(memberId, extra = {}){
   if(!memberId) throw new Error('memberId required');
   const nowIso = new Date().toISOString();
-  const todayYMD = nowIso.slice(0,10);
+  const todayYMD = manilaYMD(new Date());
 
   // Normalize keys
   const wantsOut = !!extra.wantsOut;
@@ -393,15 +411,13 @@ export async function gymQuickAppend(memberId, extra = {}){
 
   if (!open) {
     // fallback: find today's open entries for member (no TimeOut)
-    const today = new Date(); today.setHours(0,0,0,0);
     const todays = rows.filter(r => {
       try {
         const mid = String(r.MemberID || r.memberId || r.memberid || '').trim();
         if (mid !== String(memberId).trim()) return false;
-        const d = new Date(r.Date || r.date || r.DateTime || r.timestamp || r.TimeIn || '');
-        if (isNaN(d)) return false;
-        d.setHours(0,0,0,0);
-        const isToday = d.getTime() === today.getTime();
+        const d = dateLikeToDate(r.Date || r.date || r.DateTime || r.timestamp || r.TimeIn || '');
+        if (!d) return false;
+        const isToday = manilaYMD(d) === todayYMD;
         const hasOut = r.TimeOut || r.timeOut || r.Timeout || r.TimeOUT;
         return isToday && (!hasOut || String(hasOut).trim() === '');
       } catch (e) { return false; }
@@ -455,23 +471,21 @@ export async function gymClockIn(memberId, extra = {}){
   if(!memberId) throw new Error('memberId is required');
   // Try to find an existing open entry (no TimeOut) for this member for today
   const rows = await fb.getCollection(COLS.gymEntries);
-  const today = new Date();
-  today.setHours(0,0,0,0);
+  const todayYMD = manilaYMD(new Date());
   const open = rows.find(r => {
     try {
       const id = String(r.MemberID || r.memberId || r.memberid || r.id || '');
       if (!id || id.trim() !== String(memberId).trim()) return false;
-      const d = new Date(r.Date || r.date || r.DateTime || r.timestamp || '');
-      if (isNaN(d)) return false;
-      d.setHours(0,0,0,0);
-      const isToday = d.getTime() === today.getTime();
+      const d = dateLikeToDate(r.Date || r.date || r.DateTime || r.timestamp || '');
+      if (!d) return false;
+      const isToday = manilaYMD(d) === todayYMD;
       const hasOut = r.TimeOut || r.timeOut || r.Timeout || r.TimeOUT;
       return isToday && (!hasOut || String(hasOut).trim() === '');
     } catch (e) { return false; }
   });
   if (open) return { ok: true, id: open.id, existed: true };
   const now = new Date().toISOString();
-  const date = now.slice(0,10);
+  const date = manilaYMD(new Date(now));
   const res = await addGymEntry({ MemberID: memberId, TimeIn: now, Date: date, ...extra });
   return res;
 }
@@ -488,7 +502,7 @@ export async function gymClockOut(memberId, extra = {}){
   if (!open.length) {
     // no open entry — append a checkout-only row
     const now = new Date().toISOString();
-    const date = now.slice(0,10);
+    const date = manilaYMD(new Date(now));
     return addGymEntry({ MemberID: memberId, TimeOut: now, Date: date, ...extra });
   }
   const target = open[open.length - 1];
@@ -588,7 +602,7 @@ export async function addProgressRow(row) {
 export async function fetchMembersRecent({ limit = 200, days = 90 } = {}) {
   const cutoffMs = Date.now() - (days * 24 * 60 * 60 * 1000);
   const cutoff = new Date(cutoffMs);
-  const cutoffYMD = cutoff.toISOString().slice(0, 10);
+  const cutoffYMD = manilaYMD(cutoff);
 
   // Avoid full-collection scans: only look at recent gymEntries/payments, derive member IDs, then fetch only those members.
   // Also include currently-active payments (by valid-until) so status columns are correct even if the payment isn't recent.
@@ -1209,7 +1223,8 @@ export async function addRevenue(payload) {
 
 export async function fetchPaymentsSince({ days = 30, limit = 2000 } = {}) {
   const cutoff = new Date(Date.now() - (days * 24 * 60 * 60 * 1000));
-  const cutoffYMD = cutoff.toISOString().slice(0, 10);
+  const cutoffYMD = manilaYMD(cutoff);
+  const cutoffStart = cutoffYMD ? manilaStartOfDay(cutoffYMD) : cutoff;
   try {
     const rows = await fb.queryCollection(COLS.payments, {
       wheres: [{ field: 'Date', op: '>=', value: cutoffYMD }],
@@ -1217,7 +1232,7 @@ export async function fetchPaymentsSince({ days = 30, limit = 2000 } = {}) {
     });
     if (rows && rows.length) return { rows };
     const rowsTs = await fb.queryCollection(COLS.payments, {
-      wheres: [{ field: 'Date', op: '>=', value: cutoff }],
+      wheres: [{ field: 'Date', op: '>=', value: cutoffStart || cutoff }],
       limit,
     });
     return { rows: rowsTs || [] };
@@ -1750,7 +1765,7 @@ export async function fetchAttendance(dateYMD) {
 
 export async function fetchAttendanceSince({ days = 30, limit = 2000 } = {}) {
   const cutoff = new Date(Date.now() - (days * 24 * 60 * 60 * 1000));
-  const cutoffYMD = cutoff.toISOString().slice(0, 10);
+  const cutoffYMD = manilaYMD(cutoff);
   try {
     const rows = await fb.queryCollection(COLS.attendance, {
       wheres: [{ field: 'Date', op: '>=', value: cutoffYMD }],
@@ -1762,7 +1777,14 @@ export async function fetchAttendanceSince({ days = 30, limit = 2000 } = {}) {
     // fallback to full scan and client filter
     try {
       const rows = await fb.getCollection(COLS.attendance);
-      const filtered = (rows || []).filter(r => String(r.Date || '').slice(0,10) >= cutoffYMD);
+      const filtered = (rows || []).filter(r => {
+        const v = String(r.Date || '').trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v >= cutoffYMD;
+        const d = dateLikeToDate(r.Date || r.TimeIn || r.timestamp || r.createdAt || '');
+        if (!d) return false;
+        const ymd = manilaYMD(d);
+        return ymd >= cutoffYMD;
+      });
       return { rows: filtered.slice(0, limit) };
     } catch (e2) {
       return { rows: [] };
@@ -1773,7 +1795,7 @@ export async function fetchAttendanceSince({ days = 30, limit = 2000 } = {}) {
 export async function clockIn(staff) {
   if (!staff) throw new Error('staff required');
   const t = new Date().toISOString();
-  const doc = await fb.addDocument(COLS.attendance, { Staff: staff, TimeIn: t, Date: t.slice(0,10) });
+  const doc = await fb.addDocument(COLS.attendance, { Staff: staff, TimeIn: t, Date: manilaYMD(new Date(t)) });
   return { ok: true, id: doc.id };
 }
 
@@ -1790,7 +1812,7 @@ export async function clockOut(staff) {
 export async function attendanceQuickAppend(staff, extra = {}){
   if (!staff) throw new Error('staff required');
   const now = new Date().toISOString();
-  const date = now.slice(0,10);
+  const date = manilaYMD(new Date(now));
   const doc = await fb.addDocument(COLS.attendance, { Staff: staff, TimeIn: now, Date: date, ...extra });
   return { ok: true, id: doc.id };
 }
